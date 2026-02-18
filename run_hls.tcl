@@ -107,7 +107,7 @@ puts "   4. Generate Bitstream"
 puts "   5. Export Hardware (include bitstream)"
 puts "   6. Launch Xilinx SDK"
 puts "   7. Create a new application project"
-puts "   8. Replace helloworld.c with src/helloworld.c"
+puts "   8. Replace helloworld.c with src/pico_miner_arm.c"
 puts "   9. Build, program FPGA, and run!"
 puts ""
 

@@ -18,6 +18,9 @@ pico_miner_hls/
 *.o
 *.d
 
+# Personal notes (not for repo)
+doc/steps.md
+
 # LaTeX build files
 doc/*.aux
 doc/*.log
@@ -28,6 +31,7 @@ doc/*.pdf
 doc/*.synctex.gz
 doc/*.fls
 doc/*.fdb_latexmk
+doc/*.bak*
 
 # OS files
 Thumbs.db

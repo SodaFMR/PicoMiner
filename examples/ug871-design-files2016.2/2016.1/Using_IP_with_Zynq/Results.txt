@@ -1,0 +1,13 @@
+Completed Using_IP_with_Zynq\lab1\hls_macc\vhls_prj          
+@I [SIM-1] CSim done with 0 errors.
+@I [SIM-14] Instrumenting C test bench ...
+@I [SIM-12] Generating RTL test bench ...
+@I [SIM-11] Starting SystemC simulation ...
+@I [SIM-1000] *** C/RTL co-simulation finished: PASS ***
+@I [SCHED-11] Finished scheduling.
+@I [BIND-100] Finished micro-architecture generation.
+@I [RTGEN-100] Finished creating RTL model for 'hls_macc'.
+@I [HLS-10] Finished generating all RTL models.
+Finished parsing RTL primitives file [C:/Xilinx/Vivado/2013.4/data/parts/xilinx/rtl/prims/rtl_prims.xml]
+@I [SIM-1000] *** C/RTL co-simulation finished: PASS ***
+" " 																																							

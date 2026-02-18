@@ -23,25 +23,27 @@ Cryptocurrency mining relies on a brute-force search for a **nonce** value that,
 
 ```
 Pico_Miner/
-├── src/
-│   ├── pico_miner.h          # Shared header (constants, function prototype)
-│   ├── pico_miner.cpp        # HLS source (synthesized to hardware)
-│   ├── pico_miner_tb.cpp     # HLS testbench (C simulation & co-simulation)
-│   └── helloworld.c          # ARM driver (runs on Zynq PS)
+├── src/                               # Our project implementation
+│   ├── pico_miner.h                   #   Shared header (constants, function prototype)
+│   ├── pico_miner.cpp                 #   HLS source (synthesized to hardware)
+│   ├── pico_miner_tb.cpp              #   HLS testbench (C simulation & co-simulation)
+│   └── pico_miner_arm.c               #   ARM driver (runs on Zynq PS)
 ├── doc/
-│   └── poc.tex               # Proof of Concept document (LaTeX)
-├── examples/                  # Teacher's reference examples
-│   ├── readme.txt
-│   ├── vector_operator_hls.cpp
-│   ├── vector_operator_tb.cpp
-│   ├── reorder.cpp
-│   ├── reorder_tb.cpp
-│   ├── helloworld.c
-│   ├── helloworld_sws2leds.c
-│   ├── vector_operator_tb_arm.c_tobedone
-│   └── vivado_hls_compare_report.html
-├── run_hls.tcl               # Vivado HLS automation script
-└── README.md                 # This file
+│   └── poc.tex                        # Proof of Concept document (LaTeX)
+├── examples/                          # Course material provided by the teacher
+│   ├── 1. sws2leds_withAXIGPIO/       #   Basic Zynq: read switches, write LEDs via AXI GPIO
+│   ├── 3.7 hls2vhdl_complex_sqr_float/#   HLS: complex number squaring with float I/O
+│   ├── 5.hls_directives_performance/  #   HLS: vector sum/dot-product with pipeline/unroll/partition
+│   ├── complex_prod_sources/          #   HLS: complex number product with float arrays
+│   ├── convo5x/                       #   HLS: 5x5 image convolution with line buffers
+│   ├── hls2vhdl_array2saxilite/       #   HLS: array reorder via AXI-Lite (full HLS-to-board flow)
+│   ├── hls2vhdl_mycnt/                #   HLS: counter with static state (full HLS-to-board flow)
+│   ├── labdocs/                       #   Lab instruction PDFs (Labs 1-4)
+│   ├── labsource/                     #   Lab source code (matrix multiply, YUV filter, DCT, FIR)
+│   ├── ug871-design-files2016.2/      #   Xilinx UG871 tutorial design files (HLS examples)
+│   └── zynq2mblaze_sws_leds/         #   Zynq ARM + MicroBlaze communication via shared BRAM
+├── run_hls.tcl                        # Vivado HLS automation script
+└── README.md                          # This file
 ```
 
 ## How It Works
@@ -70,7 +72,7 @@ It is **not cryptographically secure** (32-bit output), but demonstrates the sam
 │   ARM Cortex-A9      │◄──────────────────►│   Pico Miner IP      │
 │   (Zynq PS)          │                    │   (Zynq PL)          │
 │                      │  Write: header,    │                      │
-│   helloworld.c       │  target, nonce     │   pico_miner.cpp     │
+│   pico_miner_arm.c   │  target, nonce     │   pico_miner.cpp     │
 │   - Configure miner  │  range             │   - Hash computation │
 │   - Start/poll/read  │                    │   - Nonce iteration  │
 │   - SW verification  │  Read: nonce,      │   - Target comparison│
@@ -120,7 +122,7 @@ vivado_hls -f run_hls.tcl
 ### Step 3: Xilinx SDK -- ARM Software
 
 1. Create a new **Application Project** (Hello World template)
-2. Replace the generated `helloworld.c` with `src/helloworld.c`
+2. Replace the generated `helloworld.c` with `src/pico_miner_arm.c`
 3. Build the project
 4. Program the FPGA and run the application
 5. Observe results on the UART serial terminal (115200 baud)
@@ -191,7 +193,7 @@ The fundamental mining loop -- hash, compare, increment nonce -- is identical. O
 | `src/pico_miner.h` | Header with constants and function prototype |
 | `src/pico_miner.cpp` | HLS source: hash function + nonce search loop (synthesized to hardware) |
 | `src/pico_miner_tb.cpp` | HLS testbench: SW golden model + 4 test cases |
-| `src/helloworld.c` | ARM driver: configures HLS IP via AXI-Lite, runs mining, verifies results |
+| `src/pico_miner_arm.c` | ARM driver: configures HLS IP via AXI-Lite, runs mining, verifies results |
 | `doc/poc.tex` | LaTeX proof of concept document with full algorithm specification |
 | `run_hls.tcl` | TCL script to automate Vivado HLS project creation and synthesis |
 
