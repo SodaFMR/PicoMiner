@@ -20,7 +20,7 @@
 set PROJECT_NAME  "pico_miner_hls"
 set TOP_FUNCTION  "pico_miner"
 set FPGA_PART     "xc7z020clg484-1"
-set CLOCK_PERIOD  10
+set CLOCK_PERIOD  25
 
 # --- Create Project ---
 open_project ${PROJECT_NAME}
@@ -107,7 +107,7 @@ puts "   4. Generate Bitstream"
 puts "   5. Export Hardware (include bitstream)"
 puts "   6. Launch Xilinx SDK"
 puts "   7. Create a new application project"
-puts "   8. Replace helloworld.c with src/pico_miner_arm.c"
+puts "   8. Add src/pico_miner_arm.c to the application project"
 puts "   9. Build, program FPGA, and run!"
 puts ""
 
