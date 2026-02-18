@@ -101,12 +101,14 @@ vivado_hls -f run_hls.tcl
 # 1. Create new project, set top function to "pico_miner"
 # 2. Add src/pico_miner.cpp and src/pico_miner.h as source files
 # 3. Add src/pico_miner_tb.cpp as testbench
-# 4. Set target part: xc7z020clg484-1, clock: 10ns
+# 4. Set target part: xc7z020clg484-1, clock: 25ns (40 MHz)
 # 5. Run C Simulation -> should print "ALL TESTS PASSED"
 # 6. Run C Synthesis -> generates RTL + performance report
 # 7. Run C/RTL Co-Simulation -> verifies RTL matches C behavior
 # 8. Export RTL (IP Catalog format)
 ```
+
+> **Clock alignment required:** Keep HLS export at `25 ns` and Vivado `processing_system7_0/FCLK_CLK0` at `40 MHz` so timing constraints match during implementation.
 
 ### Step 2: Vivado -- Create Block Design
 
@@ -163,13 +165,13 @@ ALL TESTS PASSED -- SW and HW outputs match perfectly.
 
 ## HLS Optimization Results
 
-The project includes pragmas for loop pipelining and array partitioning. Expected synthesis results at 100 MHz:
+The project includes pragmas for loop pipelining and array partitioning. Expected synthesis results at 40 MHz:
 
 | Configuration | Latency/Hash | Initiation Interval | Throughput |
 |---|---|---|---|
-| Baseline (no directives) | ~20 cycles | ~20 | ~5 MH/s |
-| Loop pipelining (II=1) | ~20 cycles | 1 | ~100 MH/s |
-| + Array partition | ~10 cycles | 1 | ~100 MH/s |
+| Baseline (no directives) | ~20 cycles | ~20 | ~2 MH/s |
+| Loop pipelining (II=1) | ~20 cycles | 1 | ~40 MH/s |
+| + Array partition | ~10 cycles | 1 | ~40 MH/s |
 
 These results can be compared using Vivado HLS "Compare Solutions" feature, similar to the approach in `examples/readme.txt`.
 

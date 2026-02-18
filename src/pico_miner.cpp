@@ -29,19 +29,32 @@
  * This is NOT cryptographically secure (32-bit output), but demonstrates
  * the hash-and-compare pattern used in real PoW mining.
  * -------------------------------------------------------------------------- */
-static unsigned int pico_hash(unsigned int data[BLOCK_HEADER_SIZE],
-                              unsigned int nonce)
+/* Precompute header contribution once; it does not depend on nonce. */
+static unsigned int pico_hash_header_prefix(
+    const unsigned int data[BLOCK_HEADER_SIZE])
 {
+#pragma HLS INLINE
     unsigned int h = HASH_SEED;
     int i;
 
     /* Absorption phase: mix in each data word */
     hash_absorb_loop:
     for (i = 0; i < BLOCK_HEADER_SIZE; i++) {
+#pragma HLS UNROLL
         h = h ^ data[i];
         h = h * FNV_PRIME;
         h = h ^ (h >> 16);
     }
+
+    return h;
+}
+
+/* Finalize hash for one nonce from the precomputed header state. */
+static unsigned int pico_hash_nonce(unsigned int header_state,
+                                    unsigned int nonce)
+{
+#pragma HLS INLINE
+    unsigned int h = header_state;
 
     /* Incorporate nonce */
     h = h ^ nonce;
@@ -91,6 +104,7 @@ void pico_miner(unsigned int block_header[BLOCK_HEADER_SIZE],
     unsigned int best_nonce = 0;
     unsigned int best_hash  = 0xFFFFFFFF;
     unsigned int mining_status = MINING_NOT_FOUND;
+    unsigned int header_state = pico_hash_header_prefix(block_header);
 
     /* --- Main mining loop: iterate through nonce range --- */
     mining_loop:
@@ -99,7 +113,7 @@ void pico_miner(unsigned int block_header[BLOCK_HEADER_SIZE],
 #pragma HLS LOOP_TRIPCOUNT min=1 max=16777216
 
         /* Compute hash for this nonce */
-        hash_result = pico_hash(block_header, nonce);
+        hash_result = pico_hash_nonce(header_state, nonce);
 
         /* Check if hash meets difficulty target */
         if (hash_result < difficulty_target) {

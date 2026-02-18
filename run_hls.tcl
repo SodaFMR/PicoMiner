@@ -13,7 +13,7 @@
 # C synthesis, and C/RTL co-simulation, then exports the IP.
 #
 # Target FPGA: xc7z020clg484-1 (Zynq-7020, e.g. ZedBoard)
-# Clock: 10 ns (100 MHz)
+# Clock: 25 ns (40 MHz)
 # =============================================================================
 
 # --- Project Configuration ---

@@ -328,14 +328,14 @@ can be read simultaneously, eliminating memory port bottlenecks.
 		\toprule
 		\textbf{Solution}          & \textbf{Latency/Hash} & \textbf{II} & \textbf{Throughput} \\
 		\midrule
-		Baseline (no directives)   & $\sim$20 cycles       & $\sim$20    & $\sim$5 MH/s        \\
-		Loop pipelining            & $\sim$20 cycles       & $\sim$1     & $\sim$100 MH/s      \\
-		Pipeline + array partition & $\sim$10 cycles       & $\sim$1     & $\sim$100 MH/s      \\
+		Baseline (no directives)   & $\sim$20 cycles       & $\sim$20    & $\sim$2 MH/s        \\
+		Loop pipelining            & $\sim$20 cycles       & $\sim$1     & $\sim$40 MH/s       \\
+		Pipeline + array partition & $\sim$10 cycles       & $\sim$1     & $\sim$40 MH/s       \\
 		\bottomrule
 	\end{tabular}
 \end{table}
 
-\noindent (At 100 MHz clock, II=1 yields $\sim$100 million hashes/second.)
+\noindent (At 40 MHz clock, II=1 yields $\sim$40 million hashes/second.)
 
 % =============================================================================
 \section{Verification Strategy}
