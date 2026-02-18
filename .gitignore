@@ -24,6 +24,7 @@ doc/*.log
 doc/*.out
 doc/*.toc
 doc/*.pdf
+!doc/poc.pdf
 doc/*.synctex.gz
 doc/*.fls
 doc/*.fdb_latexmk
