@@ -1,0 +1,38 @@
+# Vivado HLS generated files
+pico_miner_hls/
+*.log
+*.jou
+
+# Vivado project files
+*.xpr
+*.runs/
+*.cache/
+*.hw/
+*.ip_user_files/
+*.sim/
+*.srcs/
+
+# Xilinx SDK
+.sdk/
+*.elf
+*.o
+*.d
+
+# LaTeX build files
+doc/*.aux
+doc/*.log
+doc/*.out
+doc/*.toc
+doc/*.pdf
+doc/*.synctex.gz
+doc/*.fls
+doc/*.fdb_latexmk
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# IDE files
+.vscode/
+*.swp
+*~
