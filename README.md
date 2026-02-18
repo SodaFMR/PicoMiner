@@ -68,7 +68,7 @@ It is **not cryptographically secure** (32-bit output), but demonstrates the sam
 ### System Architecture
 
 ```
-┌──────────────────────┐     AXI-Lite      ┌──────────────────────┐
+┌──────────────────────┐      AXI-Lite      ┌──────────────────────┐
 │   ARM Cortex-A9      │◄──────────────────►│   Pico Miner IP      │
 │   (Zynq PS)          │                    │   (Zynq PL)          │
 │                      │  Write: header,    │                      │
