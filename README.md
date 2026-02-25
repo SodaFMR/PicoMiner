@@ -101,14 +101,14 @@ vivado_hls -f run_hls.tcl
 # 1. Create new project, set top function to "pico_miner"
 # 2. Add src/pico_miner.cpp and src/pico_miner.h as source files
 # 3. Add src/pico_miner_tb.cpp as testbench
-# 4. Set target part: xc7z020clg484-1, clock: 25ns (40 MHz)
+# 4. Set target part: xc7z020clg484-1, clock: 10ns (100 MHz)
 # 5. Run C Simulation -> should print "ALL TESTS PASSED"
 # 6. Run C Synthesis -> generates RTL + performance report
 # 7. Run C/RTL Co-Simulation -> verifies RTL matches C behavior
 # 8. Export RTL (IP Catalog format)
 ```
 
-> **Clock alignment required:** Keep HLS export at `25 ns` and Vivado `processing_system7_0/FCLK_CLK0` at `40 MHz` so timing constraints match during implementation.
+> **Clock alignment required:** Keep HLS export at `10 ns` and Vivado `processing_system7_0/FCLK_CLK0` at `100 MHz` so timing constraints match during implementation.
 
 ### Step 2: Vivado -- Create Block Design
 
@@ -116,13 +116,13 @@ vivado_hls -f run_hls.tcl
 2. Create a Block Design
 3. Add the **ZYNQ7 Processing System** IP
 4. Add the **Pico Miner** IP (from the HLS export, add the IP repository)
-5. In `processing_system7_0`, set `FCLK_CLK0 = 40 MHz` (not 100 MHz)
+5. In `processing_system7_0`, keep `FCLK_CLK0 = 100 MHz` (default)
 6. Run **Connection Automation** (connects AXI-Lite automatically)
 7. In Vivado Tcl Console, regenerate and rebuild after setting the clock:
 
 ```tcl
 open_bd_design [get_files miner.bd]
-set_property -dict [list CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ {40.0}] [get_bd_cells processing_system7_0]
+set_property -dict [list CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ {100.0}] [get_bd_cells processing_system7_0]
 validate_bd_design
 save_bd_design
 generate_target all [get_files miner.bd]
@@ -137,7 +137,7 @@ wait_on_run impl_1
 8. **Export Hardware** (File > Export > Export Hardware, include bitstream)
 9. **Launch SDK** (File > Launch SDK)
 
-If you still see timing failures, check `Reports -> Timing Summary`: the `clk_fpga_0` requirement must be `25.0 ns` (40 MHz), not `10.0 ns` (100 MHz).
+If you still see timing failures, check `Reports -> Timing Summary`: the `clk_fpga_0` requirement must be `10.0 ns` (100 MHz).
 
 ### Step 3: Xilinx SDK -- ARM Software
 
@@ -183,13 +183,13 @@ ALL TESTS PASSED -- SW and HW outputs match perfectly.
 
 ## HLS Optimization Results
 
-The project includes pragmas for loop pipelining and array partitioning. Expected synthesis results at 40 MHz:
+The project includes loop pipelining and array partitioning optimizations. Expected synthesis results at 100 MHz:
 
 | Configuration | Latency/Hash | Initiation Interval | Throughput |
 |---|---|---|---|
-| Baseline (no directives) | ~20 cycles | ~20 | ~2 MH/s |
-| Loop pipelining (II=1) | ~20 cycles | 1 | ~40 MH/s |
-| + Array partition | ~10 cycles | 1 | ~40 MH/s |
+| Baseline (no directives) | ~20 cycles | ~20 | ~5 MH/s |
+| Loop pipelining (II=4) | ~20 cycles | 4 | ~25 MH/s |
+| + Array partition | ~10 cycles | 4 | ~25 MH/s |
 
 These results can be compared using Vivado HLS "Compare Solutions" feature, similar to the approach in `examples/readme.txt`.
 

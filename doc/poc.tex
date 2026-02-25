@@ -305,11 +305,11 @@ no pipelining or parallelism.
 
 \subsection{Solution 2: Loop Pipelining}
 \begin{lstlisting}[style=cstyle]
-#pragma HLS PIPELINE II=1
+#pragma HLS PIPELINE II=4
 \end{lstlisting}
 Applied to the main nonce search loop. This allows the next nonce
 iteration to begin before the previous one completes, achieving an
-\textbf{Initiation Interval (II) of 1} --- one new hash per clock cycle
+\textbf{Initiation Interval (II) of 4} --- one new hash every four cycles
 after the pipeline fills.
 
 \subsection{Solution 3: Array Partitioning}
@@ -326,16 +326,16 @@ can be read simultaneously, eliminating memory port bottlenecks.
 	\caption{Expected Performance Across Solutions (estimated)}
 	\begin{tabular}{@{}lccc@{}}
 		\toprule
-		\textbf{Solution}          & \textbf{Latency/Hash} & \textbf{II} & \textbf{Throughput} \\
-		\midrule
-		Baseline (no directives)   & $\sim$20 cycles       & $\sim$20    & $\sim$2 MH/s        \\
-		Loop pipelining            & $\sim$20 cycles       & $\sim$1     & $\sim$40 MH/s       \\
-		Pipeline + array partition & $\sim$10 cycles       & $\sim$1     & $\sim$40 MH/s       \\
-		\bottomrule
-	\end{tabular}
-\end{table}
+			\textbf{Solution}          & \textbf{Latency/Hash} & \textbf{II} & \textbf{Throughput} \\
+			\midrule
+			Baseline (no directives)   & $\sim$20 cycles       & $\sim$20    & $\sim$5 MH/s        \\
+			Loop pipelining            & $\sim$20 cycles       & $\sim$4     & $\sim$25 MH/s       \\
+			Pipeline + array partition & $\sim$10 cycles       & $\sim$4     & $\sim$25 MH/s       \\
+			\bottomrule
+		\end{tabular}
+	\end{table}
 
-\noindent (At 40 MHz clock, II=1 yields $\sim$40 million hashes/second.)
+\noindent (At 100 MHz clock, II=4 yields $\sim$25 million hashes/second.)
 
 % =============================================================================
 \section{Verification Strategy}

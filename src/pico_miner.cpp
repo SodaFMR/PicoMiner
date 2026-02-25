@@ -40,7 +40,6 @@ static unsigned int pico_hash_header_prefix(
     /* Absorption phase: mix in each data word */
     hash_absorb_loop:
     for (i = 0; i < BLOCK_HEADER_SIZE; i++) {
-#pragma HLS PIPELINE II=1
         h = h ^ data[i];
         h = h * FNV_PRIME;
         h = h ^ (h >> 16);
@@ -109,7 +108,6 @@ void pico_miner(unsigned int block_header[BLOCK_HEADER_SIZE],
     /* --- Main mining loop: iterate through nonce range --- */
     mining_loop:
     for (nonce = nonce_start; nonce < nonce_end; nonce++) {
-#pragma HLS PIPELINE II=1
 #pragma HLS LOOP_TRIPCOUNT min=1 max=16777216
 
         /* Compute hash for this nonce */

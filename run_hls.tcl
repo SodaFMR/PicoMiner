@@ -13,14 +13,14 @@
 # C synthesis, and C/RTL co-simulation, then exports the IP.
 #
 # Target FPGA: xc7z020clg484-1 (Zynq-7020, e.g. ZedBoard)
-# Clock: 25 ns (40 MHz)
+# Clock: 10 ns (100 MHz)
 # =============================================================================
 
 # --- Project Configuration ---
 set PROJECT_NAME  "pico_miner_hls"
 set TOP_FUNCTION  "pico_miner"
 set FPGA_PART     "xc7z020clg484-1"
-set CLOCK_PERIOD  25
+set CLOCK_PERIOD  10
 
 # --- Create Project ---
 open_project ${PROJECT_NAME}
@@ -53,24 +53,20 @@ export_design -format ip_catalog -description "Pico Miner PoW Accelerator (Basel
 close_solution
 
 # =============================================================================
-# Solution 2: Loop Pipelining
-# The PIPELINE pragma is already in the source code (pico_miner.cpp).
-# In this solution, we rely on the pragma in the source. If you want to
-# experiment WITHOUT the pragma, remove it from pico_miner.cpp and add
-# the directive here instead:
-#   set_directive_pipeline "pico_miner/mining_loop"
+# Solution 2: Timing-friendly loop pipelining
+# Apply a moderate II to improve throughput while preserving 100 MHz closure.
 # =============================================================================
 open_solution "2_loop_pipelining"
 set_part ${FPGA_PART}
 create_clock -period ${CLOCK_PERIOD} -name default
 
-# The PIPELINE II=1 pragma is in the source code on the mining_loop
-# The ARRAY_PARTITION pragma is also in the source code
+# Directive-based pipelining for the mining loop
+set_directive_pipeline -II 4 "pico_miner/mining_loop"
 
 csynth_design
 cosim_design
 
-export_design -format ip_catalog -description "Pico Miner PoW Accelerator (Pipelined)" -vendor "pico_miner" -display_name "Pico Miner v1.0 Pipelined"
+export_design -format ip_catalog -description "Pico Miner PoW Accelerator (Pipelined II=4)" -vendor "pico_miner" -display_name "Pico Miner v1.0 Pipelined II=4"
 
 close_solution
 
@@ -84,7 +80,7 @@ close_solution
 # create_clock -period ${CLOCK_PERIOD} -name default
 #
 # # Apply directives via TCL instead of source pragmas
-# set_directive_pipeline "pico_miner/mining_loop" -II 1
+# set_directive_pipeline "pico_miner/mining_loop" -II 4
 # set_directive_array_partition "pico_miner" -variable block_header -type complete -dim 1
 #
 # csynth_design
@@ -102,12 +98,12 @@ puts ""
 puts " IMPORTANT:"
 puts "   run_hls.tcl only builds/exports the HLS IP."
 puts "   Bitstream timing depends on Vivado BD clock configuration."
-puts "   In Vivado, set processing_system7_0/FCLK_CLK0 to 40 MHz (25 ns)."
+puts "   In Vivado, keep processing_system7_0/FCLK_CLK0 at 100 MHz (10 ns)."
 puts ""
 puts " Next steps:"
 puts "   1. Open Vivado and create a new Block Design"
 puts "   2. Add the Zynq PS IP and the Pico Miner IP"
-puts "   3. Set processing_system7_0/FCLK_CLK0 = 40 MHz"
+puts "   3. Keep processing_system7_0/FCLK_CLK0 = 100 MHz (default)"
 puts "   4. Run Connection Automation"
 puts "   5. Generate Bitstream"
 puts "   6. Export Hardware (include bitstream)"
