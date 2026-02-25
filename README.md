@@ -118,10 +118,20 @@ vivado_hls -f run_hls.tcl
 4. Add the **Pico Miner** IP (from the HLS export, add the IP repository)
 5. In `processing_system7_0`, set `FCLK_CLK0 = 40 MHz` (not 100 MHz)
 6. Run **Connection Automation** (connects AXI-Lite automatically)
-7. Run this fix script in Vivado Tcl Console to enforce clock + rebuild:
+7. In Vivado Tcl Console, regenerate and rebuild after setting the clock:
 
 ```tcl
-source scripts/fix_vivado_clock_40mhz.tcl
+open_bd_design [get_files miner.bd]
+set_property -dict [list CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ {40.0}] [get_bd_cells processing_system7_0]
+validate_bd_design
+save_bd_design
+generate_target all [get_files miner.bd]
+make_wrapper -files [get_files miner.bd] -top
+update_compile_order -fileset sources_1
+reset_run synth_1
+reset_run impl_1
+launch_runs impl_1 -to_step write_bitstream -jobs 4
+wait_on_run impl_1
 ```
 
 8. **Export Hardware** (File > Export > Export Hardware, include bitstream)
