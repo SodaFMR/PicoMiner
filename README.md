@@ -116,10 +116,18 @@ vivado_hls -f run_hls.tcl
 2. Create a Block Design
 3. Add the **ZYNQ7 Processing System** IP
 4. Add the **Pico Miner** IP (from the HLS export, add the IP repository)
-5. Run **Connection Automation** (connects AXI-Lite automatically)
-6. **Generate Bitstream**
-7. **Export Hardware** (File > Export > Export Hardware, include bitstream)
-8. **Launch SDK** (File > Launch SDK)
+5. In `processing_system7_0`, set `FCLK_CLK0 = 40 MHz` (not 100 MHz)
+6. Run **Connection Automation** (connects AXI-Lite automatically)
+7. Run this fix script in Vivado Tcl Console to enforce clock + rebuild:
+
+```tcl
+source scripts/fix_vivado_clock_40mhz.tcl
+```
+
+8. **Export Hardware** (File > Export > Export Hardware, include bitstream)
+9. **Launch SDK** (File > Launch SDK)
+
+If you still see timing failures, check `Reports -> Timing Summary`: the `clk_fpga_0` requirement must be `25.0 ns` (40 MHz), not `10.0 ns` (100 MHz).
 
 ### Step 3: Xilinx SDK -- ARM Software
 
