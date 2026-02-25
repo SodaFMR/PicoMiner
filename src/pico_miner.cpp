@@ -40,7 +40,7 @@ static unsigned int pico_hash_header_prefix(
     /* Absorption phase: mix in each data word */
     hash_absorb_loop:
     for (i = 0; i < BLOCK_HEADER_SIZE; i++) {
-#pragma HLS UNROLL
+#pragma HLS PIPELINE II=1
         h = h ^ data[i];
         h = h * FNV_PRIME;
         h = h ^ (h >> 16);
