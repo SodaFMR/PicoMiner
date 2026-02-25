@@ -49,6 +49,9 @@ if {[catch {current_project} pm_project] || $pm_project eq ""} {
     pm_fail "No open Vivado project. Open the project first or pass an .xpr path."
 }
 
+puts "Refreshing IP catalog..."
+update_ip_catalog -rebuild
+
 set pm_bd_files [get_files -quiet -all */${pm_bd_name}.bd]
 if {[llength $pm_bd_files] == 0} {
     set pm_bd_files [get_files -quiet -all ${pm_bd_name}.bd]
@@ -87,6 +90,12 @@ puts "New PS FCLK_CLK0 frequency: ${pm_new_clk} MHz"
 puts "Regenerating BD output products and wrapper..."
 generate_target all [get_files $pm_bd_file]
 make_wrapper -files [get_files $pm_bd_file] -top
+
+set pm_ips [get_ips -quiet]
+if {[llength $pm_ips] > 0} {
+    puts "Upgrading IPs to latest available revisions..."
+    upgrade_ip -quiet $pm_ips
+}
 
 set pm_wrapper_guess [file join [file dirname $pm_bd_file] hdl ${pm_bd_name}_wrapper.v]
 if {[file exists $pm_wrapper_guess]} {
