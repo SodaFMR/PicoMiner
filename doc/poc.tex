@@ -284,11 +284,11 @@ course examples.
 	      target, and nonce range to the HLS IP via AXI-Lite registers
 	\item The ARM issues \texttt{ap\_start} to begin computation
 	\item The HLS IP iterates through the nonce range:
-	      \begin{enumerate}
-		      \item Computes $h = \text{PicoHash}(\text{header}, \text{nonce})$
-		      \item If $h < \text{target}$: stores the nonce and hash, sets
-		            status to 1, and terminates early
-	      \end{enumerate}
+		      \begin{enumerate}
+			      \item Computes $h = \text{PicoHash}(\text{header}, \text{nonce})$
+			      \item If $h < \text{target}$ and this is the first match: stores
+			            nonce and hash, sets status to 1
+		      \end{enumerate}
 	\item The ARM polls \texttt{ap\_done}, then reads the results
 	\item If no valid nonce was found in the range, status is 0
 \end{enumerate}
@@ -305,11 +305,11 @@ no pipelining or parallelism.
 
 \subsection{Solution 2: Loop Pipelining}
 \begin{lstlisting}[style=cstyle]
-#pragma HLS PIPELINE II=4
+#pragma HLS PIPELINE II=8
 \end{lstlisting}
 Applied to the main nonce search loop. This allows the next nonce
 iteration to begin before the previous one completes, achieving an
-\textbf{Initiation Interval (II) of 4} --- one new hash every four cycles
+\textbf{Initiation Interval (II) of 8} --- one new hash every eight cycles
 after the pipeline fills.
 
 \subsection{Solution 3: Array Partitioning}
@@ -329,13 +329,13 @@ can be read simultaneously, eliminating memory port bottlenecks.
 			\textbf{Solution}          & \textbf{Latency/Hash} & \textbf{II} & \textbf{Throughput} \\
 			\midrule
 			Baseline (no directives)   & $\sim$20 cycles       & $\sim$20    & $\sim$5 MH/s        \\
-			Loop pipelining            & $\sim$20 cycles       & $\sim$4     & $\sim$25 MH/s       \\
-			Pipeline + array partition & $\sim$10 cycles       & $\sim$4     & $\sim$25 MH/s       \\
+			Loop pipelining            & $\sim$20 cycles       & $\sim$8     & $\sim$12.5 MH/s     \\
+			Pipeline + array partition & $\sim$10 cycles       & $\sim$8     & $\sim$12.5 MH/s     \\
 			\bottomrule
 		\end{tabular}
 	\end{table}
 
-\noindent (At 100 MHz clock, II=4 yields $\sim$25 million hashes/second.)
+\noindent (At 100 MHz clock, II=8 yields $\sim$12.5 million hashes/second.)
 
 % =============================================================================
 \section{Verification Strategy}

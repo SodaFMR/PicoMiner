@@ -61,12 +61,12 @@ set_part ${FPGA_PART}
 create_clock -period ${CLOCK_PERIOD} -name default
 
 # Directive-based pipelining for the mining loop
-set_directive_pipeline -II 4 "pico_miner/mining_loop"
+set_directive_pipeline -II 8 "pico_miner/mining_loop"
 
 csynth_design
 cosim_design
 
-export_design -format ip_catalog -description "Pico Miner PoW Accelerator (Pipelined II=4)" -vendor "pico_miner" -display_name "Pico Miner v1.0 Pipelined II=4"
+export_design -format ip_catalog -description "Pico Miner PoW Accelerator (Pipelined II=8)" -vendor "pico_miner" -display_name "Pico Miner v1.0 Pipelined II=8"
 
 close_solution
 
@@ -80,7 +80,7 @@ close_solution
 # create_clock -period ${CLOCK_PERIOD} -name default
 #
 # # Apply directives via TCL instead of source pragmas
-# set_directive_pipeline "pico_miner/mining_loop" -II 4
+# set_directive_pipeline "pico_miner/mining_loop" -II 8
 # set_directive_array_partition "pico_miner" -variable block_header -type complete -dim 1
 #
 # csynth_design

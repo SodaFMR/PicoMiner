@@ -188,8 +188,8 @@ The project includes loop pipelining and array partitioning optimizations. Expec
 | Configuration | Latency/Hash | Initiation Interval | Throughput |
 |---|---|---|---|
 | Baseline (no directives) | ~20 cycles | ~20 | ~5 MH/s |
-| Loop pipelining (II=4) | ~20 cycles | 4 | ~25 MH/s |
-| + Array partition | ~10 cycles | 4 | ~25 MH/s |
+| Loop pipelining (II=8) | ~20 cycles | 8 | ~12.5 MH/s |
+| + Array partition | ~10 cycles | 8 | ~12.5 MH/s |
 
 These results can be compared using Vivado HLS "Compare Solutions" feature, similar to the approach in `examples/readme.txt`.
 
