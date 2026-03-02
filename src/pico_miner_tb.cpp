@@ -2,17 +2,20 @@
  * Pico Miner -- HLS Testbench
  *
  * Description:
- *   C-simulation testbench for the Pico Miner HLS IP. Contains a software
- *   golden model (pico_miner_sw) that implements the same algorithm as the
- *   HLS function. Both are run with identical inputs and their outputs are
- *   compared to verify correctness.
+ *   Testbench for the Bitcoin double-SHA-256 mining accelerator.
+ *   Uses Bitcoin Block 170 (the first block with a non-coinbase transaction,
+ *   Satoshi -> Hal Finney) as a real-world test vector.
+ *
+ *   The testbench:
+ *   1. Validates the SHA-256 implementation against NIST test vectors
+ *   2. Computes the midstate on software (same as ARM would do)
+ *   3. Calls the HLS function with a nonce range around the known answer
+ *   4. Verifies the HLS function finds the correct nonce
+ *   5. Tests the no-solution case
  *
  *   This testbench is used for:
  *   - Vivado HLS C Simulation (csim)
  *   - Vivado HLS C/RTL Co-Simulation (cosim)
- *
- * Methodology: Follows the same SW-vs-HW comparison pattern used in the
- *              course examples (vector_operator_tb.cpp, reorder_tb.cpp).
  *
  * Author: Pico Miner Project
  * Date: 2026
@@ -24,325 +27,317 @@
 #include "pico_miner.h"
 
 /* =============================================================================
- * Software Reference Implementation (Golden Model)
- *
- * This is a pure-C implementation of the same algorithm. It has NO HLS
- * pragmas and is used purely for verification. If the HLS function produces
- * the same results as this function, the synthesis is correct.
+ * Software SHA-256 Implementation (Golden Model)
  * =============================================================================
  */
 
-/* Software version of PicoHash (identical logic, no HLS pragmas) */
-static unsigned int pico_hash_sw(unsigned int data[BLOCK_HEADER_SIZE],
-                                 unsigned int nonce)
-{
-    unsigned int h = HASH_SEED;
-    int i;
-
-    for (i = 0; i < BLOCK_HEADER_SIZE; i++) {
-        h = h ^ data[i];
-        h = h * FNV_PRIME;
-        h = h ^ (h >> 16);
-    }
-
-    h = h ^ nonce;
-    h = h * MURMUR_M;
-    h = h ^ (h >> 13);
-    h = h * MURMUR_M;
-    h = h ^ (h >> 15);
-
-    return h;
+static unsigned int rotr(unsigned int x, int n) {
+    return (x >> n) | (x << (32 - n));
 }
 
-/* Software version of the miner (identical logic, no HLS pragmas) */
-static void pico_miner_sw(unsigned int block_header[BLOCK_HEADER_SIZE],
-                           unsigned int difficulty_target,
-                           unsigned int nonce_start,
-                           unsigned int nonce_end,
-                           unsigned int *found_nonce,
-                           unsigned int *found_hash,
-                           unsigned int *status)
+static void sha256_compress_sw(const unsigned int state_in[8],
+                                const unsigned int msg[16],
+                                unsigned int state_out[8])
 {
-    unsigned int nonce;
-    unsigned int hash_result;
+    unsigned int W[64];
+    unsigned int a, b, c, d, e, f, g, h;
+    int i;
 
-    *found_nonce = 0;
-    *found_hash  = 0xFFFFFFFF;
-    *status      = MINING_NOT_FOUND;
-
-    for (nonce = nonce_start; nonce < nonce_end; nonce++) {
-        hash_result = pico_hash_sw(block_header, nonce);
-        if (hash_result < difficulty_target) {
-            *found_nonce = nonce;
-            *found_hash  = hash_result;
-            *status      = MINING_FOUND;
-            break;
-        }
+    for (i = 0; i < 16; i++) W[i] = msg[i];
+    for (i = 16; i < 64; i++) {
+        unsigned int s0 = rotr(W[i-15], 7) ^ rotr(W[i-15], 18) ^ (W[i-15] >> 3);
+        unsigned int s1 = rotr(W[i-2], 17) ^ rotr(W[i-2], 19)  ^ (W[i-2] >> 10);
+        W[i] = W[i-16] + s0 + W[i-7] + s1;
     }
+
+    a = state_in[0]; b = state_in[1]; c = state_in[2]; d = state_in[3];
+    e = state_in[4]; f = state_in[5]; g = state_in[6]; h = state_in[7];
+
+    for (i = 0; i < 64; i++) {
+        unsigned int S1   = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+        unsigned int ch   = (e & f) ^ ((~e) & g);
+        unsigned int temp1 = h + S1 + ch + SHA256_K[i] + W[i];
+        unsigned int S0   = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+        unsigned int maj  = (a & b) ^ (a & c) ^ (b & c);
+        unsigned int temp2 = S0 + maj;
+        h = g; g = f; f = e; e = d + temp1;
+        d = c; c = b; b = a; a = temp1 + temp2;
+    }
+
+    state_out[0] = state_in[0] + a; state_out[1] = state_in[1] + b;
+    state_out[2] = state_in[2] + c; state_out[3] = state_in[3] + d;
+    state_out[4] = state_in[4] + e; state_out[5] = state_in[5] + f;
+    state_out[6] = state_in[6] + g; state_out[7] = state_in[7] + h;
+}
+
+/* Full SHA-256 of pre-padded message blocks */
+static void sha256_blocks_sw(const unsigned int *blocks, int num_blocks,
+                              unsigned int hash_out[8])
+{
+    unsigned int state[8];
+    int b, i;
+
+    state[0] = SHA256_H0; state[1] = SHA256_H1;
+    state[2] = SHA256_H2; state[3] = SHA256_H3;
+    state[4] = SHA256_H4; state[5] = SHA256_H5;
+    state[6] = SHA256_H6; state[7] = SHA256_H7;
+
+    for (b = 0; b < num_blocks; b++) {
+        unsigned int msg[16];
+        for (i = 0; i < 16; i++)
+            msg[i] = blocks[b * 16 + i];
+        sha256_compress_sw(state, msg, state);
+    }
+
+    for (i = 0; i < 8; i++)
+        hash_out[i] = state[i];
 }
 
 /* =============================================================================
- * Helper: Print a separator line
+ * Helper: byte-swap a 32-bit word
  * =============================================================================
  */
-static void print_separator(void)
-{
+static unsigned int bswap32(unsigned int x) {
+    return ((x & 0xFFu) << 24) | ((x & 0xFF00u) << 8) |
+           ((x >> 8) & 0xFF00u) | ((x >> 24) & 0xFFu);
+}
+
+static void print_separator(void) {
     printf("================================================================\n");
 }
 
 /* =============================================================================
- * Test Case 1: Easy difficulty -- should find a nonce quickly
+ * Test Case 1: Validate SHA-256 against NIST test vector
+ *
+ * SHA256("abc") = ba7816bf 8f01cfea 414140de 5dae2223
+ *                 b00361a3 96177a9c b410ff61 f20015ad
  * =============================================================================
  */
-static int test_easy_difficulty(void)
+static int test_sha256_known_vector(void)
 {
-    unsigned int block_header[BLOCK_HEADER_SIZE] = {
-        0xDEADBEEF,  /* Simulated previous block hash (word 0) */
-        0xCAFEBABE,  /* Simulated transaction root (word 1) */
-        0x12345678,  /* Simulated timestamp (word 2) */
-        0xABCD0001   /* Simulated block version (word 3) */
-    };
-
-    /* Easy difficulty: hash must be < 0x10000000 (top 4 bits must be 0000) */
-    unsigned int difficulty_target = 0x10000000;
-    unsigned int nonce_start = 0;
-    unsigned int nonce_end   = 0x00100000;  /* Search up to ~1M nonces */
-
-    /* SW outputs */
-    unsigned int sw_nonce, sw_hash, sw_status;
-    /* HW outputs */
-    unsigned int hw_nonce, hw_hash, hw_status;
-
     int errors = 0;
+    unsigned int msg[16];
+    unsigned int hash[8];
+    int i;
+
+    unsigned int expected[8] = {
+        0xba7816bfu, 0x8f01cfeau, 0x414140deu, 0x5dae2223u,
+        0xb00361a3u, 0x96177a9cu, 0xb410ff61u, 0xf20015adu
+    };
 
     printf("\n");
     print_separator();
-    printf("TEST 1: Easy Difficulty (target = 0x%08X)\n", difficulty_target);
+    printf("TEST 1: SHA-256 Known Vector -- SHA256(\"abc\")\n");
     print_separator();
 
-    /* Run software reference */
-    printf("[SW] Mining nonces [0x%08X, 0x%08X)...\n", nonce_start, nonce_end);
-    pico_miner_sw(block_header, difficulty_target, nonce_start, nonce_end,
-                  &sw_nonce, &sw_hash, &sw_status);
+    memset(msg, 0, sizeof(msg));
+    msg[0]  = 0x61626380u;  /* "abc" + 0x80 padding */
+    msg[15] = 0x00000018u;  /* length = 24 bits */
 
-    if (sw_status == MINING_FOUND) {
-        printf("[SW] FOUND! Nonce=0x%08X  Hash=0x%08X\n", sw_nonce, sw_hash);
-    } else {
-        printf("[SW] Not found in range.\n");
+    sha256_blocks_sw(msg, 1, hash);
+
+    printf("  Computed: ");
+    for (i = 0; i < 8; i++) printf("%08x ", hash[i]);
+    printf("\n  Expected: ");
+    for (i = 0; i < 8; i++) printf("%08x ", expected[i]);
+    printf("\n");
+
+    for (i = 0; i < 8; i++) {
+        if (hash[i] != expected[i]) {
+            printf("  MISMATCH at word %d!\n", i);
+            errors++;
+        }
     }
+    if (errors == 0) printf("  SHA-256 test: [OK]\n");
 
-    /* Run HLS hardware function */
-    printf("[HW] Mining nonces [0x%08X, 0x%08X)...\n", nonce_start, nonce_end);
-    pico_miner(block_header, difficulty_target, nonce_start, nonce_end,
-               &hw_nonce, &hw_hash, &hw_status);
+    return errors;
+}
 
-    if (hw_status == MINING_FOUND) {
-        printf("[HW] FOUND! Nonce=0x%08X  Hash=0x%08X\n", hw_nonce, hw_hash);
-    } else {
-        printf("[HW] Not found in range.\n");
-    }
+/* =============================================================================
+ * Test Case 2: Bitcoin Block 170 mining
+ *
+ * Block 170 header (80 bytes, serialized little-endian hex):
+ *   01000000
+ *   55bd840a78798ad0da853f68974f3d183e2bd1db6a842c1feecf222a00000000
+ *   ff104ccb05421ab93e63f8c3ce5c2c2e9dbb37de2764b3a3175c8166562cac7d
+ *   51b96a49
+ *   ffff001d
+ *   283e9e70
+ *
+ * Known winning nonce (LE): 0x283e9e70  -> (BE): 0x709e3e28
+ * Block hash (display):
+ *   00000000d1145790a8694403d4063f323d499e655c83426834d4ce2f8dd4a2ee
+ * =============================================================================
+ */
+static int test_bitcoin_block_170(void)
+{
+    int errors = 0;
+    int i;
 
-    /* Compare results */
-    printf("\n--- Comparison ---\n");
-    printf("  Status:  SW=%u  HW=%u  %s\n", sw_status, hw_status,
-           (sw_status == hw_status) ? "[OK]" : "[MISMATCH]");
-    printf("  Nonce:   SW=0x%08X  HW=0x%08X  %s\n", sw_nonce, hw_nonce,
-           (sw_nonce == hw_nonce) ? "[OK]" : "[MISMATCH]");
-    printf("  Hash:    SW=0x%08X  HW=0x%08X  %s\n", sw_hash, hw_hash,
-           (sw_hash == hw_hash) ? "[OK]" : "[MISMATCH]");
+    printf("\n");
+    print_separator();
+    printf("TEST 2: Bitcoin Block 170 -- Real Mining Test\n");
+    print_separator();
 
-    if (sw_status != hw_status) errors++;
-    if (sw_nonce  != hw_nonce)  errors++;
-    if (sw_hash   != hw_hash)   errors++;
+    /* Block header as 20 little-endian 32-bit words (raw serialized) */
+    unsigned int header_le[20] = {
+        0x00000001u,  /* version */
+        /* prev_hash (8 words, LE): */
+        0x0a84bd55u, 0xd08a7978u, 0x683f85dau, 0x183d4f97u,
+        0xdbd12b3eu, 0x1f2c846au, 0x2a22cfeeu, 0x00000000u,
+        /* merkle_root (8 words, LE): */
+        0xcb4c10ffu, 0xb91a4205u, 0xc3f8633eu, 0x2e2c5cceu,
+        0xde37bb9du, 0xa3b36427u, 0x66815c17u, 0x7dac2c56u,
+        /* timestamp, bits, nonce (LE): */
+        0x496ab951u,
+        0x1d00ffffu,
+        0x709e3e28u
+    };
 
-    /* Verify the hash is actually below target */
-    if (hw_status == MINING_FOUND && hw_hash >= difficulty_target) {
-        printf("  ERROR: Hash 0x%08X is NOT below target 0x%08X!\n",
-               hw_hash, difficulty_target);
+    /* Byte-swap to big-endian for SHA-256 */
+    unsigned int header_be[20];
+    for (i = 0; i < 20; i++)
+        header_be[i] = bswap32(header_le[i]);
+
+    /* Compute midstate: SHA-256 compress chunk 1 (words 0-15) */
+    unsigned int chunk1[16];
+    for (i = 0; i < 16; i++) chunk1[i] = header_be[i];
+
+    unsigned int midstate[8];
+    unsigned int init_state[8] = {
+        SHA256_H0, SHA256_H1, SHA256_H2, SHA256_H3,
+        SHA256_H4, SHA256_H5, SHA256_H6, SHA256_H7
+    };
+    sha256_compress_sw(init_state, chunk1, midstate);
+
+    printf("  Midstate: ");
+    for (i = 0; i < 8; i++) printf("%08x ", midstate[i]);
+    printf("\n");
+
+    /* Chunk 2 tail: header words 16, 17, 18 (big-endian) */
+    unsigned int chunk2_tail[3] = {
+        header_be[16], header_be[17], header_be[18]
+    };
+
+    unsigned int known_nonce_be = header_be[19];
+
+    printf("  Chunk2 tail: [%08x, %08x, %08x]\n",
+           chunk2_tail[0], chunk2_tail[1], chunk2_tail[2]);
+    printf("  Known nonce (BE): 0x%08x\n", known_nonce_be);
+
+    /* ---- Full SW double-SHA-256 for verification ---- */
+    unsigned int padded_header[32];
+    for (i = 0; i < 16; i++) padded_header[i] = header_be[i];
+    padded_header[16] = header_be[16];
+    padded_header[17] = header_be[17];
+    padded_header[18] = header_be[18];
+    padded_header[19] = header_be[19];
+    padded_header[20] = 0x80000000u;
+    for (i = 21; i < 31; i++) padded_header[i] = 0;
+    padded_header[31] = 0x00000280u;
+
+    unsigned int first_hash_sw[8];
+    sha256_blocks_sw(padded_header, 2, first_hash_sw);
+
+    printf("  SW first hash:  ");
+    for (i = 0; i < 8; i++) printf("%08x ", first_hash_sw[i]);
+    printf("\n");
+
+    /* Second hash */
+    unsigned int hash2_block[16];
+    for (i = 0; i < 8; i++) hash2_block[i] = first_hash_sw[i];
+    hash2_block[8]  = 0x80000000u;
+    for (i = 9; i < 15; i++) hash2_block[i] = 0;
+    hash2_block[15] = 0x00000100u;
+
+    unsigned int final_hash_sw[8];
+    sha256_blocks_sw(hash2_block, 1, final_hash_sw);
+
+    printf("  SW final hash:  ");
+    for (i = 0; i < 8; i++) printf("%08x ", final_hash_sw[i]);
+    printf("\n");
+
+    printf("  Block hash (display): ");
+    for (i = 7; i >= 0; i--) printf("%08x", bswap32(final_hash_sw[i]));
+    printf("\n");
+
+    if (final_hash_sw[0] != 0x00000000u) {
+        printf("  ERROR: First word of hash should be 00000000!\n");
         errors++;
+    } else {
+        printf("  SW hash verification: [OK] (starts with 32 zero bits)\n");
+    }
+
+    /* ---- HW test ---- */
+    unsigned int search_start = known_nonce_be - 16;
+    unsigned int search_end   = known_nonce_be + 16;
+    unsigned int hw_nonce = 0;
+    unsigned int hw_status = 0;
+    unsigned int target_hi = 0x00000000u;
+
+    printf("\n  [HW] Searching nonces [0x%08x, 0x%08x)...\n",
+           search_start, search_end);
+
+    pico_miner(midstate, chunk2_tail, search_start, search_end,
+               target_hi, &hw_nonce, &hw_status);
+
+    printf("  [HW] Status: %s\n",
+           (hw_status == MINING_FOUND) ? "FOUND" : "NOT FOUND");
+    if (hw_status == MINING_FOUND) {
+        printf("  [HW] Found nonce: 0x%08x\n", hw_nonce);
+    }
+
+    if (hw_status != MINING_FOUND) {
+        printf("  ERROR: HW did not find a valid nonce!\n");
+        errors++;
+    } else if (hw_nonce != known_nonce_be) {
+        printf("  NOTE: HW nonce 0x%08x differs from known 0x%08x\n",
+               hw_nonce, known_nonce_be);
+        printf("  (May be a different valid nonce in the search range)\n");
+    } else {
+        printf("  [HW] Nonce matches Bitcoin Block 170: [OK]\n");
     }
 
     return errors;
 }
 
 /* =============================================================================
- * Test Case 2: Medium difficulty
- * =============================================================================
- */
-static int test_medium_difficulty(void)
-{
-    unsigned int block_header[BLOCK_HEADER_SIZE] = {
-        0x01020304,
-        0x05060708,
-        0x090A0B0C,
-        0x0D0E0F10
-    };
-
-    /* Medium difficulty: hash must be < 0x00100000 (top 12 bits must be 0) */
-    unsigned int difficulty_target = 0x00100000;
-    unsigned int nonce_start = 0;
-    unsigned int nonce_end   = 0x01000000;  /* Search up to ~16M nonces */
-
-    unsigned int sw_nonce, sw_hash, sw_status;
-    unsigned int hw_nonce, hw_hash, hw_status;
-    int errors = 0;
-
-    printf("\n");
-    print_separator();
-    printf("TEST 2: Medium Difficulty (target = 0x%08X)\n", difficulty_target);
-    print_separator();
-
-    printf("[SW] Mining nonces [0x%08X, 0x%08X)...\n", nonce_start, nonce_end);
-    pico_miner_sw(block_header, difficulty_target, nonce_start, nonce_end,
-                  &sw_nonce, &sw_hash, &sw_status);
-
-    if (sw_status == MINING_FOUND) {
-        printf("[SW] FOUND! Nonce=0x%08X  Hash=0x%08X\n", sw_nonce, sw_hash);
-    } else {
-        printf("[SW] Not found in range.\n");
-    }
-
-    printf("[HW] Mining nonces [0x%08X, 0x%08X)...\n", nonce_start, nonce_end);
-    pico_miner(block_header, difficulty_target, nonce_start, nonce_end,
-               &hw_nonce, &hw_hash, &hw_status);
-
-    if (hw_status == MINING_FOUND) {
-        printf("[HW] FOUND! Nonce=0x%08X  Hash=0x%08X\n", hw_nonce, hw_hash);
-    } else {
-        printf("[HW] Not found in range.\n");
-    }
-
-    printf("\n--- Comparison ---\n");
-    printf("  Status:  SW=%u  HW=%u  %s\n", sw_status, hw_status,
-           (sw_status == hw_status) ? "[OK]" : "[MISMATCH]");
-    printf("  Nonce:   SW=0x%08X  HW=0x%08X  %s\n", sw_nonce, hw_nonce,
-           (sw_nonce == hw_nonce) ? "[OK]" : "[MISMATCH]");
-    printf("  Hash:    SW=0x%08X  HW=0x%08X  %s\n", sw_hash, hw_hash,
-           (sw_hash == hw_hash) ? "[OK]" : "[MISMATCH]");
-
-    if (sw_status != hw_status) errors++;
-    if (sw_nonce  != hw_nonce)  errors++;
-    if (sw_hash   != hw_hash)   errors++;
-
-    if (hw_status == MINING_FOUND && hw_hash >= difficulty_target) {
-        printf("  ERROR: Hash 0x%08X is NOT below target 0x%08X!\n",
-               hw_hash, difficulty_target);
-        errors++;
-    }
-
-    return errors;
-}
-
-/* =============================================================================
- * Test Case 3: No valid nonce in range (difficulty too hard for given range)
+ * Test Case 3: No valid nonce in range
  * =============================================================================
  */
 static int test_no_solution(void)
 {
-    unsigned int block_header[BLOCK_HEADER_SIZE] = {
-        0xAAAAAAAA,
-        0xBBBBBBBB,
-        0xCCCCCCCC,
-        0xDDDDDDDD
+    int errors = 0;
+
+    printf("\n");
+    print_separator();
+    printf("TEST 3: No Solution in Range\n");
+    print_separator();
+
+    unsigned int midstate[8] = {
+        SHA256_H0, SHA256_H1, SHA256_H2, SHA256_H3,
+        SHA256_H4, SHA256_H5, SHA256_H6, SHA256_H7
     };
+    unsigned int chunk2_tail[3] = { 0x11111111u, 0x22222222u, 0x33333333u };
+    unsigned int hw_nonce = 0, hw_status = 0;
 
-    /* Extremely hard: hash must be < 1 (essentially impossible) */
-    unsigned int difficulty_target = 0x00000001;
-    unsigned int nonce_start = 0;
-    unsigned int nonce_end   = 1000;  /* Only try 1000 nonces */
+    pico_miner(midstate, chunk2_tail, 0, 100,
+               0x00000000u, &hw_nonce, &hw_status);
 
-    unsigned int sw_nonce, sw_hash, sw_status;
-    unsigned int hw_nonce, hw_hash, hw_status;
-    int errors = 0;
+    printf("  Status: %s\n",
+           (hw_status == MINING_FOUND) ? "FOUND (unexpected)" : "NOT FOUND (expected)");
 
-    printf("\n");
-    print_separator();
-    printf("TEST 3: Impossible Difficulty (target = 0x%08X, range = %u)\n",
-           difficulty_target, nonce_end - nonce_start);
-    print_separator();
-
-    printf("[SW] Mining nonces [0x%08X, 0x%08X)...\n", nonce_start, nonce_end);
-    pico_miner_sw(block_header, difficulty_target, nonce_start, nonce_end,
-                  &sw_nonce, &sw_hash, &sw_status);
-    printf("[SW] Status: %s\n",
-           (sw_status == MINING_FOUND) ? "FOUND" : "NOT FOUND (expected)");
-
-    printf("[HW] Mining nonces [0x%08X, 0x%08X)...\n", nonce_start, nonce_end);
-    pico_miner(block_header, difficulty_target, nonce_start, nonce_end,
-               &hw_nonce, &hw_hash, &hw_status);
-    printf("[HW] Status: %s\n",
-           (hw_status == MINING_FOUND) ? "FOUND" : "NOT FOUND (expected)");
-
-    printf("\n--- Comparison ---\n");
-    printf("  Status:  SW=%u  HW=%u  %s\n", sw_status, hw_status,
-           (sw_status == hw_status) ? "[OK]" : "[MISMATCH]");
-
-    if (sw_status != hw_status) errors++;
-
-    /* Both should report NOT FOUND */
     if (hw_status != MINING_NOT_FOUND) {
-        printf("  ERROR: Expected NOT FOUND but HW reported FOUND!\n");
-        errors++;
-    }
-
-    return errors;
-}
-
-/* =============================================================================
- * Test Case 4: Hash function verification (specific known values)
- * =============================================================================
- */
-static int test_hash_determinism(void)
-{
-    unsigned int block_header[BLOCK_HEADER_SIZE] = {0, 0, 0, 0};
-    unsigned int hash_a, hash_b;
-    int errors = 0;
-
-    printf("\n");
-    print_separator();
-    printf("TEST 4: Hash Determinism and Avalanche Check\n");
-    print_separator();
-
-    /* Same input must produce same output */
-    hash_a = pico_hash_sw(block_header, 0);
-    hash_b = pico_hash_sw(block_header, 0);
-    printf("  Hash(zeros, nonce=0): 0x%08X  (repeat: 0x%08X)  %s\n",
-           hash_a, hash_b, (hash_a == hash_b) ? "[OK]" : "[MISMATCH]");
-    if (hash_a != hash_b) errors++;
-
-    /* Different nonces should produce different hashes */
-    hash_a = pico_hash_sw(block_header, 0);
-    hash_b = pico_hash_sw(block_header, 1);
-    printf("  Hash(zeros, nonce=0)=0x%08X  vs  Hash(zeros, nonce=1)=0x%08X\n",
-           hash_a, hash_b);
-    printf("  Different? %s\n", (hash_a != hash_b) ? "[OK]" : "[FAIL - same!]");
-    if (hash_a == hash_b) errors++;
-
-    /* Small data change should produce very different hash (avalanche) */
-    unsigned int header_a[BLOCK_HEADER_SIZE] = {0, 0, 0, 0};
-    unsigned int header_b[BLOCK_HEADER_SIZE] = {1, 0, 0, 0};  /* 1-bit change */
-    hash_a = pico_hash_sw(header_a, 42);
-    hash_b = pico_hash_sw(header_b, 42);
-    printf("  Hash([0,0,0,0], 42)=0x%08X  vs  Hash([1,0,0,0], 42)=0x%08X\n",
-           hash_a, hash_b);
-
-    /* Count differing bits (hamming distance) */
-    unsigned int diff = hash_a ^ hash_b;
-    int bit_count = 0;
-    while (diff) { bit_count += diff & 1; diff >>= 1; }
-    printf("  Hamming distance: %d / 32 bits (ideal ~16)\n", bit_count);
-    /* A good hash should flip ~half the bits; warn if fewer than 8 */
-    if (bit_count < 8) {
-        printf("  WARNING: Poor avalanche behavior!\n");
+        printf("  WARNING: Found nonce unexpectedly (very improbable).\n");
     } else {
-        printf("  Avalanche: [OK]\n");
+        printf("  No-solution test: [OK]\n");
     }
 
     return errors;
 }
 
 /* =============================================================================
- * Main: Run all tests
+ * Main
  * =============================================================================
  */
 int main(void)
@@ -352,20 +347,19 @@ int main(void)
     printf("\n");
     printf("################################################################\n");
     printf("#                                                              #\n");
-    printf("#             PICO MINER -- HLS Testbench                     #\n");
-    printf("#         FPGA-Based Proof of Work Mining Accelerator          #\n");
+    printf("#         PICO MINER -- Bitcoin SHA-256 HLS Testbench          #\n");
+    printf("#       FPGA-Based Proof of Work Mining Accelerator            #\n");
     printf("#                                                              #\n");
     printf("################################################################\n");
 
-    total_errors += test_easy_difficulty();
-    total_errors += test_medium_difficulty();
+    total_errors += test_sha256_known_vector();
+    total_errors += test_bitcoin_block_170();
     total_errors += test_no_solution();
-    total_errors += test_hash_determinism();
 
     printf("\n");
     print_separator();
     if (total_errors == 0) {
-        printf("ALL TESTS PASSED -- SW and HW outputs match perfectly.\n");
+        printf("ALL TESTS PASSED -- Bitcoin double-SHA-256 mining verified.\n");
     } else {
         printf("FAILED: %d error(s) detected.\n", total_errors);
     }

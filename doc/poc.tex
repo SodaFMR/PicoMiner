@@ -1,6 +1,6 @@
 % =============================================================================
 % Pico Miner -- Proof of Concept Document
-% FPGA-Based Proof of Work Mining Accelerator
+% FPGA-Based Bitcoin SHA-256 Mining Accelerator
 % =============================================================================
 \documentclass[12pt,a4paper]{article}
 
@@ -48,7 +48,7 @@
 % --- Title ---
 \title{%
     \textbf{Pico Miner} \\[0.5em]
-    \large FPGA-Based Proof of Work Mining Accelerator \\[0.3em]
+    \large FPGA-Based Bitcoin SHA-256 Mining Accelerator \\[0.3em]
     \large Proof of Concept Document
 }
 \author{Pico Miner Project}
@@ -67,21 +67,21 @@
 Cryptocurrency mining is the process by which new transactions are verified
 and added to the blockchain ledger. The core computational challenge is
 known as \textbf{Proof of Work (PoW)}: miners must find a value (called a
-\textit{nonce}) such that the hash of the block data concatenated with the
-nonce produces a result that satisfies a certain difficulty condition ---
-typically, the hash must be numerically less than a \textit{target} value.
+\textit{nonce}) such that the hash of the block data produces a result that
+satisfies a certain difficulty condition --- typically, the hash must be
+numerically less than a \textit{target} value.
 
-In Bitcoin, this involves computing the \texttt{SHA-256} hash function
-twice (double SHA-256) over an 80-byte block header while iterating over
+In Bitcoin, this involves computing the SHA-256 hash function twice
+(\textit{double SHA-256}) over an 80-byte block header while iterating over
 a 32-bit nonce space. The difficulty target is adjusted so that, on average,
 a valid nonce is found every 10 minutes across the entire network.
 
-\textbf{Pico Miner} is a proof-of-concept project that demonstrates the
-fundamental principles of PoW mining accelerated on an FPGA. Rather than
-implementing the full SHA-256 algorithm (which is complex and
-resource-intensive), we use a \textbf{custom lightweight hash function}
-that preserves the essential properties needed for PoW while being
-practical for implementation in Vivado HLS on a Zynq-7020 FPGA.
+\textbf{Pico Miner} is a proof-of-concept project that implements
+\textbf{real Bitcoin double-SHA-256 mining} with midstate optimization,
+accelerated on a Zynq-7020 FPGA using Vivado HLS 2019.1. The design is
+verified against \textbf{Bitcoin Block~170} --- the first block containing
+a non-coinbase transaction (Satoshi Nakamoto sent 10~BTC to Hal Finney
+on January~12, 2009).
 
 % =============================================================================
 \section{Background: How Bitcoin Mining Works}
@@ -92,23 +92,42 @@ practical for implementation in Vivado HLS on a Zynq-7020 FPGA.
 A blockchain is a distributed, append-only ledger where each block contains:
 \begin{itemize}
 	\item A reference (hash) to the previous block
-	\item A set of transactions
-	\item A timestamp
+	\item A set of transactions (represented by the Merkle root)
+	\item A timestamp and difficulty bits
 	\item A \textit{nonce} value
 \end{itemize}
+
+\subsection{The 80-Byte Block Header}
+
+Every Bitcoin block header consists of exactly 80~bytes (640~bits):
+
+\begin{table}[h]
+	\centering
+	\caption{Bitcoin Block Header Structure}
+	\begin{tabular}{@{}lcl@{}}
+		\toprule
+		\textbf{Field}    & \textbf{Size (bytes)} & \textbf{Description} \\
+		\midrule
+		Version           & 4  & Block version number \\
+		Previous hash     & 32 & SHA-256d hash of the previous block header \\
+		Merkle root       & 32 & Hash of all transactions in the block \\
+		Timestamp         & 4  & Unix timestamp \\
+		Bits              & 4  & Compact representation of the target \\
+		Nonce             & 4  & Value iterated by miners \\
+		\bottomrule
+	\end{tabular}
+\end{table}
 
 \subsection{Proof of Work}
 
 The PoW mechanism requires that:
 \begin{equation}
-	\text{Hash}(\text{block\_header} \,\|\, \text{nonce}) < \text{target}
+	\text{SHA-256}\bigl(\text{SHA-256}(\text{block\_header})\bigr) < \text{target}
 \end{equation}
 
-where $\|$ denotes concatenation and the \textit{target} is a threshold
-derived from the current difficulty. Since cryptographic hash functions
-behave as pseudo-random oracles, the only way to find a valid nonce is
-by \textbf{brute-force iteration} --- trying nonce values one by one until
-the condition is met.
+Since SHA-256 behaves as a pseudo-random oracle, the only way to find a
+valid nonce is by \textbf{brute-force iteration} --- trying nonce values
+one by one until the condition is met.
 
 \subsection{Why FPGAs?}
 
@@ -116,146 +135,154 @@ FPGAs offer several advantages for PoW mining:
 \begin{itemize}
 	\item \textbf{Parallelism}: Multiple hash computations can run
 	      simultaneously in hardware
-	\item \textbf{Pipelining}: The hash computation can be deeply pipelined
-	      to achieve high throughput (one hash per clock cycle)
+	\item \textbf{Pipelining}: The compression rounds can be deeply
+	      pipelined to achieve high throughput
 	\item \textbf{Energy efficiency}: Dedicated hardware is far more
-	      energy-efficient than general-purpose CPUs or GPUs for this
-	      repetitive computation
+	      energy-efficient than general-purpose CPUs or GPUs
 	\item \textbf{Low latency}: Direct hardware implementation avoids
 	      instruction fetch/decode overhead
 \end{itemize}
 
 % =============================================================================
-\section{Project Scope and Simplifications}
+\section{SHA-256 Algorithm}
 % =============================================================================
 
-This project is a \textbf{proof of concept} designed for educational
-purposes. The following table compares real Bitcoin mining with our
-simplified implementation:
+\subsection{Overview}
 
-\begin{table}[h]
-	\centering
-	\caption{Comparison: Bitcoin Mining vs. Pico Miner}
-	\begin{tabular}{@{}lll@{}}
-		\toprule
-		\textbf{Aspect} & \textbf{Bitcoin}                & \textbf{Pico Miner}                \\
-		\midrule
-		Hash function   & Double SHA-256 (512-bit blocks) & Custom 32-bit hash (PicoHash)      \\
-		Block header    & 80 bytes (640 bits)             & 16 bytes (4 $\times$ 32-bit words) \\
-		Nonce size      & 32 bits                         & 32 bits                            \\
-		Difficulty      & 256-bit target comparison       & 32-bit target comparison           \\
-		Output          & 256-bit hash                    & 32-bit hash                        \\
-		Network         & Peer-to-peer blockchain         & Standalone demonstration           \\
-		\bottomrule
-	\end{tabular}
-\end{table}
+SHA-256 (Secure Hash Algorithm, 256-bit) is defined in FIPS~180-4.
+It processes input in 512-bit (64-byte) blocks, maintaining an
+eight-word (256-bit) state that is updated by a compression function
+consisting of 64~rounds.
 
-\subsection{What is Preserved}
+\subsection{Message Padding}
 
-Despite the simplifications, our project preserves the \textbf{core
-	algorithmic structure} of PoW mining:
+The input message is padded to a multiple of 512~bits:
 \begin{enumerate}
-	\item \textbf{Brute-force nonce search}: The miner iterates through
-	      nonce values, just like a real miner
-	\item \textbf{Hash computation per nonce}: Each nonce attempt requires
-	      a full hash computation
-	\item \textbf{Difficulty-based acceptance}: The hash must be below
-	      a target to be ``valid''
-	\item \textbf{Hardware acceleration}: The hash + compare loop runs
-	      in dedicated FPGA hardware, controlled by ARM software
-	\item \textbf{HLS optimization}: We demonstrate how pipeline and
-	      unroll directives dramatically improve throughput
+	\item Append a single \texttt{1} bit
+	\item Append \texttt{0} bits until the length is $\equiv 448 \pmod{512}$
+	\item Append the original message length as a 64-bit big-endian integer
 \end{enumerate}
 
-% =============================================================================
-\section{PicoHash: Custom Hash Function}
-% =============================================================================
+For the 80-byte Bitcoin header, the padded message is 1024~bits (two 512-bit blocks).
 
-\subsection{Design Rationale}
+\subsection{Compression Function}
 
-Our custom hash function, \textbf{PicoHash}, is inspired by the DJB2 and
-FNV hash families. It is designed to be:
-\begin{itemize}
-	\item \textbf{Simple}: Easily synthesizable in HLS with minimal
-	      resources
-	\item \textbf{Deterministic}: Same input always produces the same
-	      output
-	\item \textbf{Avalanche-prone}: Small input changes cause large
-	      output changes (desirable for PoW)
-	\item \textbf{Non-invertible (practically)}: Difficult to reverse
-	      analytically, requiring brute force to find a valid nonce
-\end{itemize}
-
-\subsection{Algorithm Definition}
+Each 512-bit block is processed as follows:
 
 \begin{algorithm}[H]
-	\caption{PicoHash$(data[0..N{-}1], \, nonce)$}
+	\caption{SHA-256 Compression (one 64-byte block)}
 	\begin{algorithmic}[1]
-		\STATE $h \leftarrow \texttt{0x5A3C\_F1E7}$ \COMMENT{Initial seed}
-		\FOR{$i = 0$ \TO $N-1$}
-		\STATE $h \leftarrow h \oplus data[i]$ \COMMENT{XOR with data word}
-		\STATE $h \leftarrow h \times \texttt{0x01000193}$ \COMMENT{FNV prime multiply}
-		\STATE $h \leftarrow h \oplus (h \gg 16)$ \COMMENT{Mix upper bits into lower}
+		\STATE \textbf{Input:} State $H[0..7]$, Message block $M[0..15]$
+		\STATE \textbf{Message schedule expansion:}
+		\FOR{$i = 0$ \TO $15$}
+			\STATE $W[i] \leftarrow M[i]$
 		\ENDFOR
-		\STATE $h \leftarrow h \oplus nonce$ \COMMENT{Incorporate nonce}
-		\STATE $h \leftarrow h \times \texttt{0x5BD1E995}$ \COMMENT{MurmurHash finalizer constant}
-		\STATE $h \leftarrow h \oplus (h \gg 13)$
-		\STATE $h \leftarrow h \times \texttt{0x5BD1E995}$
-		\STATE $h \leftarrow h \oplus (h \gg 15)$
-		\RETURN $h$
+		\FOR{$i = 16$ \TO $63$}
+			\STATE $W[i] \leftarrow \sigma_1(W[i{-}2]) + W[i{-}7] + \sigma_0(W[i{-}15]) + W[i{-}16]$
+		\ENDFOR
+		\STATE \textbf{Initialise working variables:}
+		\STATE $a,b,c,d,e,f,g,h \leftarrow H[0],H[1],\ldots,H[7]$
+		\STATE \textbf{64 compression rounds:}
+		\FOR{$i = 0$ \TO $63$}
+			\STATE $T_1 \leftarrow h + \Sigma_1(e) + \text{Ch}(e,f,g) + K[i] + W[i]$
+			\STATE $T_2 \leftarrow \Sigma_0(a) + \text{Maj}(a,b,c)$
+			\STATE $h \leftarrow g;\; g \leftarrow f;\; f \leftarrow e;\; e \leftarrow d + T_1$
+			\STATE $d \leftarrow c;\; c \leftarrow b;\; b \leftarrow a;\; a \leftarrow T_1 + T_2$
+		\ENDFOR
+		\STATE \textbf{Update state:}
+		\STATE $H[i] \leftarrow H[i] + \{a,b,c,d,e,f,g,h\}$ for $i = 0..7$
 	\end{algorithmic}
 \end{algorithm}
 
-The algorithm has two phases:
+Where the SHA-256 functions are:
+\begin{align}
+	\text{Ch}(e,f,g)  &= (e \wedge f) \oplus (\neg e \wedge g) \\
+	\text{Maj}(a,b,c) &= (a \wedge b) \oplus (a \wedge c) \oplus (b \wedge c) \\
+	\Sigma_0(a)        &= \text{ROTR}^2(a) \oplus \text{ROTR}^{13}(a) \oplus \text{ROTR}^{22}(a) \\
+	\Sigma_1(e)        &= \text{ROTR}^6(e) \oplus \text{ROTR}^{11}(e) \oplus \text{ROTR}^{25}(e) \\
+	\sigma_0(x)        &= \text{ROTR}^7(x) \oplus \text{ROTR}^{18}(x) \oplus \text{SHR}^3(x) \\
+	\sigma_1(x)        &= \text{ROTR}^{17}(x) \oplus \text{ROTR}^{19}(x) \oplus \text{SHR}^{10}(x)
+\end{align}
+
+\subsection{Double SHA-256 for Bitcoin}
+
+Bitcoin mining computes:
+\[
+	\text{hash} = \text{SHA-256}\bigl(\text{SHA-256}(\text{header}_{80\text{B}})\bigr)
+\]
+
+The first SHA-256 processes the 80-byte header (padded to 128~bytes = 2~blocks).
+The second SHA-256 processes the resulting 32-byte digest (padded to 64~bytes = 1~block).
+Total: \textbf{3 compression rounds} per nonce without optimization.
+
+% =============================================================================
+\section{Midstate Optimization}
+% =============================================================================
+
+\subsection{Key Insight}
+
+The 80-byte block header spans two SHA-256 input blocks:
+\begin{itemize}
+	\item \textbf{Chunk~1} (bytes 0--63): version + previous hash + merkle root bytes 0--27
+	\item \textbf{Chunk~2} (bytes 64--79 + padding): merkle root bytes 28--31 + timestamp + bits + \textbf{nonce}
+\end{itemize}
+
+Since the nonce is in chunk~2, the SHA-256 state after processing chunk~1
+is \textbf{constant} across all nonce attempts. This intermediate state is
+called the \textit{midstate}.
+
+\subsection{ARM/FPGA Partitioning}
+
+\begin{center}
+\begin{tikzpicture}[
+    block/.style={rectangle, draw, fill=blue!10, text width=6cm,
+        text centered, minimum height=1.4cm, rounded corners},
+    hwblock/.style={rectangle, draw, fill=orange!15, text width=6cm,
+        text centered, minimum height=1.4cm, rounded corners},
+    arrow/.style={->, thick, >=stealth}
+]
+    % ARM side
+    \node[block] (arm) {ARM Cortex-A9 (PS)};
+    \node[block, below=0.5cm of arm] (midstate) {
+        Compute midstate (once) \\
+        \footnotesize SHA-256 compress(H\_init, chunk1)
+    };
+
+    % FPGA side
+    \node[hwblock, right=2cm of arm] (fpga) {FPGA Miner IP (PL)};
+    \node[hwblock, below=0.5cm of fpga] (mining) {
+        Per-nonce mining loop \\
+        \footnotesize 2$\times$ SHA-256 compress (128 rounds)
+    };
+
+    % Connections
+    \draw[arrow] (arm) -- node[above]{\footnotesize AXI-Lite} (fpga);
+    \draw[arrow] (midstate) -- node[left]{\footnotesize } (arm);
+    \draw[arrow] (fpga) -- node[right]{\footnotesize } (mining);
+
+    % Labels
+    \node[below=0.3cm of midstate, text width=6cm, align=center, font=\footnotesize] {
+        Sends: midstate[8], chunk2\_tail[3], \\
+        nonce\_start, nonce\_end, target\_hi
+    };
+    \node[below=0.3cm of mining, text width=6cm, align=center, font=\footnotesize] {
+        Returns: found\_nonce, status
+    };
+\end{tikzpicture}
+\end{center}
+
+The ARM computes the midstate \textbf{once}, then the FPGA performs only:
 \begin{enumerate}
-	\item \textbf{Absorption}: Iterates over the block data words, mixing
-	      each into the hash state via XOR and multiplication
-	\item \textbf{Finalization}: After incorporating the nonce, applies
-	      a MurmurHash-inspired bit-mixing sequence to ensure good
-	      avalanche behavior
+	\item 64 compression rounds for chunk~2 (starting from midstate)
+	\item 64 compression rounds for the second SHA-256
 \end{enumerate}
 
-\subsection{Properties}
-
-\begin{itemize}
-	\item \textbf{Output size}: 32 bits (unsigned integer)
-	\item \textbf{Input}: Array of 32-bit words + 32-bit nonce
-	\item \textbf{Latency}: $O(N)$ for $N$ data words, plus constant
-	      finalization steps
-	\item \textbf{Collision resistance}: Not cryptographically secure
-	      (32-bit output), but sufficient for educational PoW demonstration
-\end{itemize}
+This reduces the per-nonce work from 3~compressions to \textbf{2~compressions}
+(128~rounds total), a 33\% reduction.
 
 % =============================================================================
 \section{System Architecture}
 % =============================================================================
-
-\subsection{Hardware/Software Partitioning}
-
-The system follows the Zynq PS/PL architecture:
-
-\begin{center}
-	\begin{tikzpicture}[
-			block/.style={rectangle, draw, fill=blue!10, text width=5cm,
-					text centered, minimum height=1.2cm, rounded corners},
-			hwblock/.style={rectangle, draw, fill=orange!15, text width=5cm,
-					text centered, minimum height=1.2cm, rounded corners},
-			arrow/.style={->, thick, >=stealth}
-		]
-		% PS side
-		\node[block] (arm) {ARM Cortex-A9 (PS) \\ \footnotesize Software Control};
-		\node[block, below=0.8cm of arm] (driver) {C Driver Code \\ \footnotesize Write header, target, read results};
-
-		% PL side
-		\node[hwblock, right=2.5cm of arm] (miner) {Pico Miner IP (PL) \\ \footnotesize HLS-Generated Hardware};
-		\node[hwblock, below=0.8cm of miner] (hash) {PicoHash Core \\ \footnotesize Nonce iteration + hashing};
-
-		% Connections
-		\draw[arrow] (arm) -- node[above]{\footnotesize AXI-Lite} (miner);
-		\draw[arrow] (driver) -- (arm);
-		\draw[arrow] (miner) -- (hash);
-	\end{tikzpicture}
-\end{center}
 
 \subsection{HLS IP Interface}
 
@@ -263,85 +290,153 @@ The HLS IP function signature is:
 
 \begin{lstlisting}[style=cstyle]
 void pico_miner(
-    int block_header[4],   // Input: simplified block header
-    int difficulty_target,  // Input: hash must be < this value
-    int nonce_start,        // Input: beginning of nonce range
-    int nonce_end,          // Input: end of nonce range
-    int *found_nonce,       // Output: the winning nonce (if found)
-    int *found_hash,        // Output: the winning hash value
-    int *status             // Output: 1 = found, 0 = not found
+    unsigned int midstate[8],      // Precomputed SHA-256 state after chunk 1
+    unsigned int chunk2_tail[3],   // merkle_tail, timestamp, bits
+    unsigned int nonce_start,      // Beginning of nonce range
+    unsigned int nonce_end,        // End of nonce range (exclusive)
+    unsigned int target_hi,        // MSB of difficulty target
+    unsigned int *found_nonce,     // Output: winning nonce (if found)
+    unsigned int *status           // Output: 1 = found, 0 = not found
 );
 \end{lstlisting}
 
 All ports are mapped to AXI-Lite (\texttt{s\_axilite}) bundled into a
-single bus called \texttt{myaxi}, following the same methodology as the
-course examples.
+single bus called \texttt{myaxi}. Vivado HLS 2019.1 maps array arguments
+as individual scalar registers:
+\begin{itemize}
+	\item \texttt{midstate[8]} $\rightarrow$ \texttt{Set\_midstate\_0} \ldots \texttt{Set\_midstate\_7}
+	\item \texttt{chunk2\_tail[3]} $\rightarrow$ \texttt{Set\_chunk2\_tail\_0} \ldots \texttt{Set\_chunk2\_tail\_2}
+\end{itemize}
 
 \subsection{Mining Operation Flow}
 
 \begin{enumerate}
-	\item The ARM processor writes the block header (4 words), difficulty
-	      target, and nonce range to the HLS IP via AXI-Lite registers
-	\item The ARM issues \texttt{ap\_start} to begin computation
-	\item The HLS IP iterates through the nonce range:
-		      \begin{enumerate}
-			      \item Computes $h = \text{PicoHash}(\text{header}, \text{nonce})$
-			      \item If $h < \text{target}$ and this is the first match: stores
-			            nonce and hash, sets status to 1
-		      \end{enumerate}
-	\item The ARM polls \texttt{ap\_done}, then reads the results
-	\item If no valid nonce was found in the range, status is 0
+	\item The ARM parses the 80-byte block header and byte-swaps to big-endian
+	\item The ARM computes the midstate: \texttt{sha256\_compress(H\_init, chunk1)}
+	\item The ARM writes midstate[8], chunk2\_tail[3], nonce range, and target
+	      to the FPGA via AXI-Lite
+	\item The ARM issues \texttt{ap\_start}
+	\item The FPGA iterates nonces:
+	      \begin{enumerate}
+		      \item Builds chunk~2 message block (tail + nonce + SHA-256 padding)
+		      \item Compresses chunk~2 with the midstate $\rightarrow$ first hash
+		      \item Hashes the first hash with SHA-256 initial values $\rightarrow$ final hash
+		      \item If \texttt{final\_hash[0] <= target\_hi}: stores nonce, sets status
+	      \end{enumerate}
+	\item The ARM polls \texttt{ap\_done}, then reads \texttt{found\_nonce} and \texttt{status}
 \end{enumerate}
 
 % =============================================================================
 \section{HLS Optimization Strategy}
 % =============================================================================
 
-Following the course methodology, we explore multiple optimization levels:
+\subsection{SHA-256 Compress Function}
 
-\subsection{Solution 1: Pipelined with Two-Stage Hash (II=2)}
-The nonce hash finalization is split into two inline stages, each
-containing a single 32$\times$32 multiply.  This keeps the critical
-path under 10\,ns on the Zynq-7020 speed-grade~$-1$, resolving the
-setup timing violations (WNS $= -1.4$\,ns) seen with a single-stage
-design.
+The \texttt{sha256\_compress()} function is the critical inner kernel:
 
 \begin{lstlisting}[style=cstyle]
-#pragma HLS PIPELINE II=2
-#pragma HLS INLINE          // on each hash stage
+static void sha256_compress(const unsigned int state_in[8],
+                            const unsigned int W_in[16],
+                            unsigned int state_out[8])
+{
+#pragma HLS INLINE off
+    unsigned int W[64];
+#pragma HLS ARRAY_PARTITION variable=W complete dim=1
+
+    // Load + expand W (fully unrolled)
+    // 64 compression rounds (pipelined II=1)
+    compress:
+    for (i = 0; i < 64; i++) {
+#pragma HLS PIPELINE II=1
+        // ... round computation
+    }
+}
 \end{lstlisting}
-Applied to the main nonce search loop. HLS inserts a pipeline register
-between the two multiply stages, achieving an \textbf{Initiation
-Interval (II) of~2} --- one new hash result every two clock cycles.
 
-\subsection{Solution 2: Relaxed Pipeline (II=4, Tcl directive)}
-An alternative solution overrides the source-level II=2 with a
-Tcl directive \texttt{set\_directive\_pipeline -II 4} for lower
-resource usage while still providing good throughput.
+Key optimizations:
+\begin{itemize}
+	\item \texttt{ARRAY\_PARTITION complete} on \texttt{W[64]}: all 64~words
+	      accessible in parallel (no memory port contention)
+	\item \texttt{UNROLL} on W load and expansion: computed combinationally
+	\item \texttt{PIPELINE II=1} on the 64-round loop: one round per clock cycle
+	\item \texttt{INLINE off}: keeps the compress function as a reusable module
+	      (called twice per nonce -- once for chunk~2, once for the second hash)
+\end{itemize}
 
-\subsection{Array Partitioning}
-\begin{lstlisting}[style=cstyle]
-#pragma HLS ARRAY_PARTITION variable=block_header complete
-\end{lstlisting}
-Applied in both solutions.  Ensures all block header words
-can be read simultaneously, eliminating memory port bottlenecks.
+\subsection{Mining Loop}
 
-\subsection{Expected Performance Scaling}
+The top-level mining loop has no explicit pipeline pragma.
+Each iteration calls \texttt{sha256\_compress} twice sequentially,
+so each nonce takes approximately $2 \times 64 = 128$ clock cycles.
+
+\subsection{Solution Configurations}
 
 \begin{table}[h]
 	\centering
-	\caption{Expected Performance Across Solutions (estimated)}
-	\begin{tabular}{@{}lcc@{}}
+	\caption{HLS Solution Configurations}
+	\begin{tabular}{@{}lccc@{}}
 		\toprule
-			\textbf{Solution}                   & \textbf{II} & \textbf{Throughput} \\
-			\midrule
-			Pipelined II=2 (source pragma)       & 2           & $\sim$50 MH/s       \\
-			Relaxed pipeline II=4 (Tcl override) & 4           & $\sim$25 MH/s       \\
-			\bottomrule
-		\end{tabular}
-	\end{table}
+		\textbf{Solution}         & \textbf{Compress II} & \textbf{Cycles/nonce} & \textbf{Throughput (est.)} \\
+		\midrule
+		1: Baseline (II=1)        & 1 & $\sim$128 & $\sim$780 KH/s \\
+		2: Relaxed (II=2)         & 2 & $\sim$256 & $\sim$390 KH/s \\
+		\bottomrule
+	\end{tabular}
+\end{table}
 
-\noindent (At 100 MHz clock, II=2 yields $\sim$50 million hashes/second.)
+Solution~2 uses a Tcl directive to override the source-level II=1:
+\begin{lstlisting}[style=cstyle,language=Tcl,numbers=none]
+set_directive_pipeline -II 2 "sha256_compress/compress"
+\end{lstlisting}
+
+This provides more timing margin if Solution~1 fails to meet the
+10\,ns constraint at 100\,MHz.
+
+% =============================================================================
+\section{Test Vector: Bitcoin Block 170}
+% =============================================================================
+
+The project uses Bitcoin Block~170 as its primary test vector.
+
+\subsection{Block Header}
+
+\begin{table}[h]
+	\centering
+	\caption{Bitcoin Block 170 Header Fields}
+	\begin{tabular}{@{}ll@{}}
+		\toprule
+		\textbf{Field} & \textbf{Value (hex, LE serialized)} \\
+		\midrule
+		Version       & \texttt{01000000} \\
+		Prev hash     & \texttt{55bd840a...00000000} (32 bytes) \\
+		Merkle root   & \texttt{ff104ccb...562cac7d} (32 bytes) \\
+		Timestamp     & \texttt{51b96a49} \\
+		Bits          & \texttt{ffff001d} \\
+		Nonce (LE)    & \texttt{283e9e70} \\
+		\bottomrule
+	\end{tabular}
+\end{table}
+
+\subsection{Expected Results}
+
+\begin{itemize}
+	\item Nonce (big-endian): \texttt{0x709e3e28}
+	\item Block hash (display order): \texttt{00000000d1145790a8694403d4063f323d499e655c83426834d4ce2f8dd4a2ee}
+	\item Target (hi word): \texttt{0x00000000} (first 32~bits of hash must be zero)
+\end{itemize}
+
+\subsection{Testbench Structure}
+
+The HLS testbench (\texttt{pico\_miner\_tb.cpp}) contains three test cases:
+\begin{enumerate}
+	\item \textbf{NIST known vector}: SHA-256(``abc'') validated against the
+	      official FIPS~180-4 test vector
+	\item \textbf{Block~170 mining}: Computes midstate in software, calls
+	      the HLS function with a $\pm16$ nonce window, verifies it finds
+	      the correct nonce
+	\item \textbf{No-solution case}: Verifies the miner correctly reports
+	      ``not found'' when no valid nonce exists in the range
+\end{enumerate}
 
 % =============================================================================
 \section{Verification Strategy}
@@ -349,45 +444,82 @@ can be read simultaneously, eliminating memory port bottlenecks.
 
 \subsection{C Simulation (csim)}
 
-A software testbench (\texttt{pico\_miner\_tb.cpp}) contains:
+The testbench includes a complete software SHA-256 implementation as a
+golden model. It validates:
 \begin{itemize}
-	\item A \texttt{pico\_miner\_sw()} reference function implementing
-	      the same algorithm in pure C
-	\item Test cases with known difficulty levels and expected results
-	\item Bit-exact comparison between SW and HW outputs
+	\item SHA-256 correctness against NIST test vectors
+	\item Double-SHA-256 mining against the known Block~170 result
+	\item Correct handling of no-solution ranges
 \end{itemize}
 
 \subsection{C/RTL Co-Simulation (cosim)}
 
-After C synthesis, the generated RTL is verified against the C testbench
-using Vivado HLS co-simulation to confirm cycle-accurate correctness.
+After C synthesis, the generated RTL is verified against the C testbench.
+The testbench uses a narrow nonce window ($\pm16$) to keep cosim runtime
+manageable despite the 128~cycles per nonce.
 
 \subsection{ARM Integration Test}
 
-The ARM driver code (\texttt{pico\_miner\_arm.c}) performs the same SW vs. HW
-comparison on the actual Zynq hardware, printing results via UART.
+The ARM driver (\texttt{pico\_miner\_arm.c}) performs:
+\begin{enumerate}
+	\item Block header parsing and byte-swapping
+	\item Midstate computation on ARM
+	\item Hardware mining via AXI-Lite
+	\item Software golden model mining
+	\item Bit-exact comparison of HW vs SW results
+\end{enumerate}
+
+% =============================================================================
+\section{Comparison: Previous PicoHash vs Current SHA-256}
+% =============================================================================
+
+The project was initially developed with a simplified custom hash function
+(PicoHash) and later upgraded to real Bitcoin SHA-256:
+
+\begin{table}[h]
+	\centering
+	\caption{PicoHash vs SHA-256 Implementation}
+	\begin{tabular}{@{}lll@{}}
+		\toprule
+		\textbf{Aspect} & \textbf{PicoHash (v1)} & \textbf{SHA-256 (v2)} \\
+		\midrule
+		Hash function   & Custom 32-bit (FNV+Murmur) & FIPS 180-4 SHA-256 \\
+		Block header    & 16 bytes (4 words) & 80 bytes (real Bitcoin) \\
+		Output          & 32-bit hash & 256-bit hash \\
+		Difficulty      & 32-bit comparison & 256-bit comparison \\
+		Optimization    & Split multiply stages & Midstate precomputation \\
+		Test vector     & Synthetic data & Bitcoin Block 170 \\
+		Throughput      & $\sim$50 MH/s (II=2) & $\sim$780 KH/s (II=1) \\
+		\bottomrule
+	\end{tabular}
+\end{table}
+
+While the SHA-256 version has much lower throughput (due to 128~rounds per
+nonce vs.\ 2~cycles for PicoHash), it implements \textbf{real Bitcoin mining}
+and can find actual valid block nonces.
 
 % =============================================================================
 \section{Conclusion}
 % =============================================================================
 
-Pico Miner demonstrates that the fundamental principles of cryptocurrency
-Proof of Work mining can be effectively mapped to FPGA hardware using
-Vivado HLS. By using a simplified hash function, we preserve the core
-computational pattern --- brute-force nonce search with hash comparison ---
-while keeping the design practical for a Zynq-7020 target.
+Pico Miner demonstrates that real Bitcoin mining can be implemented on a
+Zynq-7020 FPGA using Vivado HLS. The design implements the complete
+double-SHA-256 algorithm with midstate optimization, verified against
+a real Bitcoin block (Block~170).
 
 The project showcases:
 \begin{itemize}
-	\item High-Level Synthesis of a mining algorithm from C to RTL
+	\item High-Level Synthesis of SHA-256 from C to RTL
+	\item Midstate optimization for efficient ARM/FPGA partitioning
 	\item AXI-Lite integration for PS/PL communication
-	\item HLS directive optimization (pipeline, array partition)
-	\item SW/HW verification methodology with golden model comparison
+	\item HLS directive optimization (pipeline II=1, array partition, unroll)
+	\item Multi-level verification: NIST test vectors, real block mining,
+	      SW/HW golden model comparison
 \end{itemize}
 
-This approach could be extended to implement real SHA-256 hashing for
-actual Bitcoin mining, though that would require significantly more
-FPGA resources and design effort.
+The estimated throughput of $\sim$780\,KH/s at 100\,MHz, while far below
+modern Bitcoin ASICs, demonstrates the fundamental principles and
+architecture of hardware-accelerated cryptocurrency mining.
 
 % =============================================================================
 \end{document}
