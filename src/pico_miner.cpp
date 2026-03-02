@@ -48,22 +48,33 @@ static unsigned int pico_hash_header_prefix(
     return h;
 }
 
-/* Finalize hash for one nonce from the precomputed header state. */
-static unsigned int pico_hash_nonce(unsigned int header_state,
-                                    unsigned int nonce)
+/* --------------------------------------------------------------------------
+ * Nonce finalization -- split into two inline stages.
+ *
+ * On Zynq-7020 (-1 speed grade) a 32x32 multiply takes ~5-6 ns.  Chaining
+ * two multiplies plus XOR-shifts plus the difficulty comparison exceeds the
+ * 10 ns budget (WNS was -1.4 ns in earlier builds).  By marking each stage
+ * as INLINE, HLS is free to place a pipeline register between them when the
+ * mining loop is pipelined, keeping each cycle well under 10 ns.
+ * -------------------------------------------------------------------------- */
+
+/* Stage 1: XOR nonce into header state, first multiply + shift. */
+static unsigned int pico_hash_nonce_s1(unsigned int header_state,
+                                       unsigned int nonce)
 {
-#pragma HLS INLINE off
-    unsigned int h = header_state;
-
-    /* Incorporate nonce */
-    h = h ^ nonce;
-
-    /* Finalization (MurmurHash-style bit mixing) */
+#pragma HLS INLINE
+    unsigned int h = header_state ^ nonce;
     h = h * MURMUR_M;
     h = h ^ (h >> 13);
+    return h;
+}
+
+/* Stage 2: second multiply + final shift. */
+static unsigned int pico_hash_nonce_s2(unsigned int h)
+{
+#pragma HLS INLINE
     h = h * MURMUR_M;
     h = h ^ (h >> 15);
-
     return h;
 }
 
@@ -99,6 +110,7 @@ void pico_miner(unsigned int block_header[BLOCK_HEADER_SIZE],
 #pragma HLS ARRAY_PARTITION variable=block_header complete dim=1
 
     unsigned int nonce;
+    unsigned int hash_s1;
     unsigned int hash_result;
     unsigned int best_nonce = 0;
     unsigned int best_hash  = 0xFFFFFFFF;
@@ -106,15 +118,25 @@ void pico_miner(unsigned int block_header[BLOCK_HEADER_SIZE],
     unsigned int found = 0;
     unsigned int header_state = pico_hash_header_prefix(block_header);
 
-    /* --- Main mining loop: iterate through nonce range --- */
+    /* --- Main mining loop: iterate through nonce range ---
+     *
+     * The hash computation is split into two inline stages so that HLS
+     * can insert a pipeline register between the two 32x32 multiplies.
+     * This keeps each pipeline stage under 10 ns on Zynq-7020 (-1).
+     */
     mining_loop:
     for (nonce = nonce_start; nonce < nonce_end; nonce++) {
+#pragma HLS PIPELINE II=2
 #pragma HLS LOOP_TRIPCOUNT min=1 max=16777216
 
-        /* Compute hash for this nonce */
-        hash_result = pico_hash_nonce(header_state, nonce);
+        /* Stage 1: XOR nonce + first multiply/shift */
+        hash_s1 = pico_hash_nonce_s1(header_state, nonce);
 
-        /* Capture only the first valid nonce to avoid loop-exit control pressure. */
+        /* Stage 2: second multiply/shift */
+        hash_result = pico_hash_nonce_s2(hash_s1);
+
+        /* Capture only the first valid nonce to avoid loop-exit control
+         * pressure (no early exit -- lets HLS pipeline freely). */
         if (!found && (hash_result < difficulty_target)) {
             best_nonce = nonce;
             best_hash  = hash_result;

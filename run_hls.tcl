@@ -32,7 +32,12 @@ add_files       src/pico_miner.h
 add_files -tb   src/pico_miner_tb.cpp
 
 # =============================================================================
-# Solution 1: Baseline (no optimization directives)
+# Solution 1: Baseline with timing-safe pipeline (II=2)
+#
+# The source code embeds #pragma HLS PIPELINE II=2 inside mining_loop.
+# II=2 lets HLS place a register between the two 32x32 multiplies,
+# keeping every pipeline stage under 10 ns on Zynq-7020 (-1).
+# Throughput: ~50 MH/s at 100 MHz.
 # =============================================================================
 open_solution "1_baseline"
 set_part ${FPGA_PART}
@@ -48,31 +53,34 @@ csynth_design
 cosim_design
 
 # Export IP as AXI-Lite peripheral
-export_design -format ip_catalog -description "Pico Miner PoW Accelerator (Baseline)" -vendor "pico_miner" -display_name "Pico Miner v1.0 Baseline"
+export_design -format ip_catalog -description "Pico Miner PoW Accelerator (Pipelined II=2)" -vendor "pico_miner" -display_name "Pico Miner v1.0 Pipelined"
 
 close_solution
 
 # =============================================================================
-# Solution 2: Timing-friendly loop pipelining
-# Apply a moderate II to improve throughput while preserving 100 MHz closure.
+# Solution 2: Relaxed pipeline (II=4, directive override)
+#
+# Overrides the source-level II=2 with a more conservative II=4 via
+# Tcl directive.  Lower resource usage, still good throughput (~25 MH/s).
+# Demonstrates the directive-based workflow for the teacher.
 # =============================================================================
-open_solution "2_loop_pipelining"
+open_solution "2_relaxed_pipeline"
 set_part ${FPGA_PART}
 create_clock -period ${CLOCK_PERIOD} -name default
 
-# Directive-based pipelining for the mining loop
-set_directive_pipeline -II 8 "pico_miner/mining_loop"
+# Override source pragma with a wider II
+set_directive_pipeline -II 4 "pico_miner/mining_loop"
 
 csynth_design
 cosim_design
 
-export_design -format ip_catalog -description "Pico Miner PoW Accelerator (Pipelined II=8)" -vendor "pico_miner" -display_name "Pico Miner v1.0 Pipelined II=8"
+export_design -format ip_catalog -description "Pico Miner PoW Accelerator (Pipelined II=4)" -vendor "pico_miner" -display_name "Pico Miner v1.0 Pipelined II=4"
 
 close_solution
 
 # =============================================================================
 # Solution 3: Directive-based optimization (alternative approach)
-# Remove pragmas from source code and use directives here instead.
+# Uses only Tcl directives (the source #pragma PIPELINE is overridden).
 # This shows the teacher the "directive-based" workflow.
 # =============================================================================
 # open_solution "3_directives_only"
@@ -80,7 +88,7 @@ close_solution
 # create_clock -period ${CLOCK_PERIOD} -name default
 #
 # # Apply directives via TCL instead of source pragmas
-# set_directive_pipeline "pico_miner/mining_loop" -II 8
+# set_directive_pipeline "pico_miner/mining_loop" -II 2
 # set_directive_array_partition "pico_miner" -variable block_header -type complete -dim 1
 #
 # csynth_design

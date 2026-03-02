@@ -108,7 +108,7 @@ vivado_hls -f run_hls.tcl
 # 8. Export RTL (IP Catalog format)
 ```
 
-> **Clock alignment required:** Keep HLS export at `10 ns` and Vivado `processing_system7_0/FCLK_CLK0` at `100 MHz` so timing constraints match during implementation.
+> **Clock alignment required:** Keep HLS export at `10 ns` and Vivado `processing_system7_0/FCLK_CLK0` at `100 MHz` so timing constraints match during implementation. The nonce hash is split into two pipeline stages to keep the critical path (one 32x32 multiply + XOR-shift per stage) under 10 ns on the Zynq-7020 (-1 speed grade).
 
 ### Step 2: Vivado -- Create Block Design
 
@@ -183,13 +183,12 @@ ALL TESTS PASSED -- SW and HW outputs match perfectly.
 
 ## HLS Optimization Results
 
-The project includes loop pipelining and array partitioning optimizations. Expected synthesis results at 100 MHz:
+The project includes loop pipelining and array partitioning optimizations. The nonce hash is split into two inline stages so that each pipeline stage contains only one 32x32 multiply, keeping combinational delay under 10 ns on the Zynq-7020 (-1 speed grade). Expected synthesis results at 100 MHz:
 
-| Configuration | Latency/Hash | Initiation Interval | Throughput |
-|---|---|---|---|
-| Baseline (no directives) | ~20 cycles | ~20 | ~5 MH/s |
-| Loop pipelining (II=8) | ~20 cycles | 8 | ~12.5 MH/s |
-| + Array partition | ~10 cycles | 8 | ~12.5 MH/s |
+| Configuration | Initiation Interval | Throughput |
+|---|---|---|
+| Pipelined II=2 (source pragma) | 2 | ~50 MH/s |
+| Relaxed pipeline II=4 (Tcl directive) | 4 | ~25 MH/s |
 
 These results can be compared using Vivado HLS "Compare Solutions" feature, similar to the approach in `examples/readme.txt`.
 

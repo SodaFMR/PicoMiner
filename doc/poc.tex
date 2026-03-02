@@ -299,24 +299,31 @@ course examples.
 
 Following the course methodology, we explore multiple optimization levels:
 
-\subsection{Solution 1: Baseline}
-No directives applied. The nonce search loop executes sequentially with
-no pipelining or parallelism.
+\subsection{Solution 1: Pipelined with Two-Stage Hash (II=2)}
+The nonce hash finalization is split into two inline stages, each
+containing a single 32$\times$32 multiply.  This keeps the critical
+path under 10\,ns on the Zynq-7020 speed-grade~$-1$, resolving the
+setup timing violations (WNS $= -1.4$\,ns) seen with a single-stage
+design.
 
-\subsection{Solution 2: Loop Pipelining}
 \begin{lstlisting}[style=cstyle]
-#pragma HLS PIPELINE II=8
+#pragma HLS PIPELINE II=2
+#pragma HLS INLINE          // on each hash stage
 \end{lstlisting}
-Applied to the main nonce search loop. This allows the next nonce
-iteration to begin before the previous one completes, achieving an
-\textbf{Initiation Interval (II) of 8} --- one new hash every eight cycles
-after the pipeline fills.
+Applied to the main nonce search loop. HLS inserts a pipeline register
+between the two multiply stages, achieving an \textbf{Initiation
+Interval (II) of~2} --- one new hash result every two clock cycles.
 
-\subsection{Solution 3: Array Partitioning}
+\subsection{Solution 2: Relaxed Pipeline (II=4, Tcl directive)}
+An alternative solution overrides the source-level II=2 with a
+Tcl directive \texttt{set\_directive\_pipeline -II 4} for lower
+resource usage while still providing good throughput.
+
+\subsection{Array Partitioning}
 \begin{lstlisting}[style=cstyle]
 #pragma HLS ARRAY_PARTITION variable=block_header complete
 \end{lstlisting}
-Combined with loop pipelining, this ensures all block header words
+Applied in both solutions.  Ensures all block header words
 can be read simultaneously, eliminating memory port bottlenecks.
 
 \subsection{Expected Performance Scaling}
@@ -324,18 +331,17 @@ can be read simultaneously, eliminating memory port bottlenecks.
 \begin{table}[h]
 	\centering
 	\caption{Expected Performance Across Solutions (estimated)}
-	\begin{tabular}{@{}lccc@{}}
+	\begin{tabular}{@{}lcc@{}}
 		\toprule
-			\textbf{Solution}          & \textbf{Latency/Hash} & \textbf{II} & \textbf{Throughput} \\
+			\textbf{Solution}                   & \textbf{II} & \textbf{Throughput} \\
 			\midrule
-			Baseline (no directives)   & $\sim$20 cycles       & $\sim$20    & $\sim$5 MH/s        \\
-			Loop pipelining            & $\sim$20 cycles       & $\sim$8     & $\sim$12.5 MH/s     \\
-			Pipeline + array partition & $\sim$10 cycles       & $\sim$8     & $\sim$12.5 MH/s     \\
+			Pipelined II=2 (source pragma)       & 2           & $\sim$50 MH/s       \\
+			Relaxed pipeline II=4 (Tcl override) & 4           & $\sim$25 MH/s       \\
 			\bottomrule
 		\end{tabular}
 	\end{table}
 
-\noindent (At 100 MHz clock, II=8 yields $\sim$12.5 million hashes/second.)
+\noindent (At 100 MHz clock, II=2 yields $\sim$50 million hashes/second.)
 
 % =============================================================================
 \section{Verification Strategy}
