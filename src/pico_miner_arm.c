@@ -166,10 +166,11 @@ int main(void)
            nonce_start, nonce_end);
     printf("\r\n");
 
-    /* Write block header array to IP */
-    XPico_miner_Write_block_header_Words(&Pico_miner_inst, 0,
-                                          (int *)block_header,
-                                          BLOCK_HEADER_SIZE);
+    /* Write block header words to IP (one register per word) */
+    XPico_miner_Set_block_header_0(&Pico_miner_inst, block_header[0]);
+    XPico_miner_Set_block_header_1(&Pico_miner_inst, block_header[1]);
+    XPico_miner_Set_block_header_2(&Pico_miner_inst, block_header[2]);
+    XPico_miner_Set_block_header_3(&Pico_miner_inst, block_header[3]);
 
     /* Write scalar parameters */
     XPico_miner_Set_difficulty_target(&Pico_miner_inst, difficulty_target);
