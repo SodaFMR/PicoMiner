@@ -6,10 +6,18 @@
  *   It communicates with the Pico Miner HLS IP (Bitcoin double-SHA-256 miner)
  *   instantiated in the programmable logic (PL) via AXI-Lite registers.
  *
- *   The driver:
- *   1. Prepares the Bitcoin Block 170 header (real-world test vector)
+ *   The driver mines REAL Bitcoin blocks using the identical double-SHA-256
+ *   algorithm used by every Bitcoin miner since 2009.  It demonstrates
+ *   mining of three actual blocks from the Bitcoin blockchain:
+ *
+ *   - Block 1:   First block after genesis (Satoshi, Jan 9 2009)
+ *   - Block 170: First non-coinbase tx (Satoshi -> Hal Finney, 10 BTC)
+ *   - Block 181: Early block with two transactions
+ *
+ *   For each block, the driver:
+ *   1. Parses the real 80-byte block header
  *   2. Computes the midstate on ARM (SHA-256 state after chunk 1)
- *   3. Sends midstate[8] + chunk2_tail[3] + nonce range + target to FPGA
+ *   3. Sends midstate + chunk2_tail + nonce range + target to FPGA
  *   4. Starts the HW miner and polls for completion
  *   5. Reads back found_nonce + status
  *   6. Runs SW golden model for verification
@@ -130,7 +138,6 @@ static void pico_miner_sw(const unsigned int midstate[8],
     *status = MINING_NOT_FOUND;
 
     for (nonce = nonce_start; nonce < nonce_end; nonce++) {
-        /* Build chunk 2 message block */
         unsigned int chunk2_W[16];
         chunk2_W[0]  = chunk2_tail[0];
         chunk2_W[1]  = chunk2_tail[1];
@@ -138,24 +145,20 @@ static void pico_miner_sw(const unsigned int midstate[8],
         chunk2_W[3]  = nonce;
         chunk2_W[4]  = 0x80000000u;
         for (i = 5; i < 15; i++) chunk2_W[i] = 0;
-        chunk2_W[15] = 0x00000280u;  /* 640 bits */
+        chunk2_W[15] = 0x00000280u;
 
-        /* First SHA-256: compress chunk 2 with midstate */
         unsigned int first_hash[8];
         sha256_compress_sw(midstate, chunk2_W, first_hash);
 
-        /* Build second hash message block */
         unsigned int hash2_W[16];
         for (i = 0; i < 8; i++) hash2_W[i] = first_hash[i];
         hash2_W[8]  = 0x80000000u;
         for (i = 9; i < 15; i++) hash2_W[i] = 0;
-        hash2_W[15] = 0x00000100u;  /* 256 bits */
+        hash2_W[15] = 0x00000100u;
 
-        /* Second SHA-256 */
         unsigned int final_hash[8];
         sha256_compress_sw(SHA256_H_INIT, hash2_W, final_hash);
 
-        /* Check difficulty */
         if (final_hash[0] <= target_hi) {
             *found_nonce = nonce;
             *status = MINING_FOUND;
@@ -165,76 +168,200 @@ static void pico_miner_sw(const unsigned int midstate[8],
 }
 
 /* =============================================================================
+ * Block header data structures
+ * =============================================================================
+ */
+typedef struct {
+    const char        *name;
+    const char        *description;
+    unsigned int       header_le[20];
+    const char        *expected_hash;
+} bitcoin_block_t;
+
+/* Three real Bitcoin blocks -- headers obtained from the blockchain */
+static const bitcoin_block_t BLOCKS[] = {
+    {
+        /* ---- Block 1 ----
+         * The first block after the genesis block.
+         * Mined by Satoshi Nakamoto on January 9, 2009.
+         * Raw: 010000006fe28c0ab6f1b372c1a6a246ae63f74f931e8365e15a089c
+         *      68d6190000000000982051fd1e4ba744bbbe680e1fee14677ba1a3c354
+         *      0bf7b1cdb606e857233e0e61bc6649ffff001d01e36299
+         */
+        "Block 1",
+        "First block after genesis (Satoshi, Jan 9 2009)",
+        {
+            0x00000001u,
+            0x0a8ce26fu, 0x72b3f1b6u, 0x46a2a6c1u, 0x4ff763aeu,
+            0x65831e93u, 0x9c085ae1u, 0x0019d668u, 0x00000000u,
+            0xfd512098u, 0x44a74b1eu, 0x0e68bebbu, 0x6714ee1fu,
+            0xc3a3a17bu, 0xb1f70b54u, 0xe806b6cdu, 0x0e3e2357u,
+            0x4966bc61u, 0x1d00ffffu, 0x9962e301u
+        },
+        "00000000839a8e6886ab5951d76f411475428afc90947ee320161bbf18eb6048"
+    },
+    {
+        /* ---- Block 170 ----
+         * First block with a non-coinbase transaction.
+         * Satoshi Nakamoto sent 10 BTC to Hal Finney on January 12, 2009.
+         * Raw: 0100000055bd840a78798ad0da853f68974f3d183e2bd1db6a842c1f
+         *      eecf222a00000000ff104ccb05421ab93e63f8c3ce5c2c2e9dbb37de27
+         *      64b3a3175c8166562cac7d51b96a49ffff001d283e9e70
+         */
+        "Block 170",
+        "First non-coinbase tx: Satoshi -> Hal Finney, 10 BTC (Jan 12 2009)",
+        {
+            0x00000001u,
+            0x0a84bd55u, 0xd08a7978u, 0x683f85dau, 0x183d4f97u,
+            0xdbd12b3eu, 0x1f2c846au, 0x2a22cfeeu, 0x00000000u,
+            0xcb4c10ffu, 0xb91a4205u, 0xc3f8633eu, 0x2e2c5cceu,
+            0xde37bb9du, 0xa3b36427u, 0x66815c17u, 0x7dac2c56u,
+            0x496ab951u, 0x1d00ffffu, 0x709e3e28u
+        },
+        "00000000d1145790a8694403d4063f323d499e655c83426834d4ce2f8dd4a2ee"
+    },
+    {
+        /* ---- Block 181 ----
+         * Early block with two transactions.
+         * Raw: 01000000f2c8a8d2af43a9cd05142654e56f41d159ce0274d9cabe15
+         *      a20eefb500000000366c2a0915f05db4b450c050ce7165acd55f823fee
+         *      51430a8c993e0bdbb192ede5dc6a49ffff001d192d3f2f
+         */
+        "Block 181",
+        "Early block with two transactions (Jan 12 2009)",
+        {
+            0x00000001u,
+            0xd2a8c8f2u, 0xcda943afu, 0x54261405u, 0xd1416fe5u,
+            0x7402ce59u, 0x15becad9u, 0xb5ef0ea2u, 0x00000000u,
+            0x092a6c36u, 0xb45df015u, 0x50c050b4u, 0xac6571ceu,
+            0x3f825fd5u, 0x0a4351eeu, 0x0b3e998cu, 0xed92b1dbu,
+            0x496adce5u, 0x1d00ffffu, 0x2f3f2d19u
+        },
+        "00000000dc55860c8a29c58d45209318fa9e9dc2c1833a7226d86bc465afc6e5"
+    }
+};
+
+#define NUM_BLOCKS (sizeof(BLOCKS) / sizeof(BLOCKS[0]))
+
+/* =============================================================================
+ * Mine a single block: ARM computes midstate, FPGA searches nonces
+ * =============================================================================
+ */
+static int mine_block(XPico_miner *inst, const bitcoin_block_t *block)
+{
+    int i;
+    unsigned int header_be[20];
+    unsigned int chunk1[16];
+    unsigned int midstate[MIDSTATE_WORDS];
+    unsigned int chunk2_tail[CHUNK2_TAIL_WORDS];
+    unsigned int known_nonce_be;
+
+    /* Byte-swap header to big-endian for SHA-256 */
+    for (i = 0; i < 20; i++)
+        header_be[i] = bswap32(block->header_le[i]);
+
+    /* Compute midstate: SHA-256 compress(H_init, chunk1) */
+    for (i = 0; i < 16; i++) chunk1[i] = header_be[i];
+    sha256_compress_sw(SHA256_H_INIT, chunk1, midstate);
+
+    /* Extract chunk2 tail and known nonce */
+    chunk2_tail[0] = header_be[16];
+    chunk2_tail[1] = header_be[17];
+    chunk2_tail[2] = header_be[18];
+    known_nonce_be = header_be[19];
+
+    /* Search window: ±4096 nonces around known answer
+     * Wide enough to be a meaningful demo, narrow enough to finish quickly
+     * on real FPGA hardware (~8192 nonces * 128 cycles/nonce = ~1M cycles = ~10ms) */
+    unsigned int nonce_start = known_nonce_be - 4096;
+    unsigned int nonce_end   = known_nonce_be + 4096;
+    unsigned int target_hi   = 0x00000000u;
+
+    printf("------------------------------------------------------------\r\n");
+    printf("[MINING] %s\r\n", block->name);
+    printf("  %s\r\n", block->description);
+    printf("  Known nonce (LE): 0x%08X  (BE): 0x%08X\r\n",
+           block->header_le[19], known_nonce_be);
+    printf("  Expected hash: %s\r\n", block->expected_hash);
+    printf("  Midstate: ");
+    for (i = 0; i < 8; i++) printf("%08x ", midstate[i]);
+    printf("\r\n");
+    printf("  Search range: [0x%08X, 0x%08X)  (%u nonces)\r\n",
+           nonce_start, nonce_end, nonce_end - nonce_start);
+    printf("\r\n");
+
+    /* ---- Write parameters to FPGA ---- */
+    XPico_miner_Set_midstate_0(inst, midstate[0]);
+    XPico_miner_Set_midstate_1(inst, midstate[1]);
+    XPico_miner_Set_midstate_2(inst, midstate[2]);
+    XPico_miner_Set_midstate_3(inst, midstate[3]);
+    XPico_miner_Set_midstate_4(inst, midstate[4]);
+    XPico_miner_Set_midstate_5(inst, midstate[5]);
+    XPico_miner_Set_midstate_6(inst, midstate[6]);
+    XPico_miner_Set_midstate_7(inst, midstate[7]);
+
+    XPico_miner_Set_chunk2_tail_0(inst, chunk2_tail[0]);
+    XPico_miner_Set_chunk2_tail_1(inst, chunk2_tail[1]);
+    XPico_miner_Set_chunk2_tail_2(inst, chunk2_tail[2]);
+
+    XPico_miner_Set_nonce_start(inst, nonce_start);
+    XPico_miner_Set_nonce_end(inst, nonce_end);
+    XPico_miner_Set_target_hi(inst, target_hi);
+
+    /* ---- Start HW miner ---- */
+    printf("  [HW] Starting FPGA miner...\r\n");
+    XPico_miner_Start(inst);
+
+    while (!XPico_miner_IsDone(inst)) {
+        /* Busy wait */
+    }
+
+    /* ---- Read HW results ---- */
+    unsigned int hw_nonce  = XPico_miner_Get_found_nonce(inst);
+    unsigned int hw_status = XPico_miner_Get_status(inst);
+
+    printf("  [HW] Status: %s\r\n",
+           (hw_status == MINING_FOUND) ? "FOUND" : "NOT FOUND");
+    if (hw_status == MINING_FOUND) {
+        printf("  [HW] Nonce (BE): 0x%08X  (LE): 0x%08X\r\n",
+               hw_nonce, bswap32(hw_nonce));
+    }
+
+    /* ---- Run SW golden model ---- */
+    unsigned int sw_nonce, sw_status;
+    pico_miner_sw(midstate, chunk2_tail, nonce_start, nonce_end,
+                  target_hi, &sw_nonce, &sw_status);
+
+    printf("  [SW] Status: %s\r\n",
+           (sw_status == MINING_FOUND) ? "FOUND" : "NOT FOUND");
+    if (sw_status == MINING_FOUND) {
+        printf("  [SW] Nonce (BE): 0x%08X\r\n", sw_nonce);
+    }
+
+    /* ---- Compare ---- */
+    int pass = (hw_status == sw_status) && (hw_nonce == sw_nonce);
+    printf("  HW vs SW: %s\r\n", pass ? "[MATCH]" : "[MISMATCH]");
+
+    if (hw_status == MINING_FOUND && hw_nonce == known_nonce_be) {
+        printf("  Nonce matches %s from the Bitcoin blockchain: [OK]\r\n",
+               block->name);
+    }
+    printf("\r\n");
+
+    return pass ? 0 : 1;
+}
+
+/* =============================================================================
  * Main Program
  * =============================================================================
  */
 int main(void)
 {
-    /* --- HLS IP instance and configuration --- */
-    XPico_miner          Pico_miner_inst;
-    XPico_miner_Config  *Pico_miner_cfg_ptr;
+    XPico_miner          inst;
+    XPico_miner_Config  *cfg_ptr;
     int hw_status_init;
-    int i;
-
-    /* =========================================================================
-     * Bitcoin Block 170 header (real-world test vector)
-     *
-     * Block 170 is the first block with a non-coinbase transaction
-     * (Satoshi -> Hal Finney, 10 BTC).
-     *
-     * Header (80 bytes, serialized little-endian hex):
-     *   01000000
-     *   55bd840a78798ad0da853f68974f3d183e2bd1db6a842c1feecf222a00000000
-     *   ff104ccb05421ab93e63f8c3ce5c2c2e9dbb37de2764b3a3175c8166562cac7d
-     *   51b96a49
-     *   ffff001d
-     *   283e9e70
-     *
-     * Known winning nonce (LE): 0x283e9e70  -> (BE): 0x709e3e28
-     * Block hash (display order):
-     *   00000000d1145790a8694403d4063f323d499e655c83426834d4ce2f8dd4a2ee
-     * ========================================================================= */
-
-    unsigned int header_le[20] = {
-        0x00000001u,  /* version */
-        /* prev_hash (8 words, LE): */
-        0x0a84bd55u, 0xd08a7978u, 0x683f85dau, 0x183d4f97u,
-        0xdbd12b3eu, 0x1f2c846au, 0x2a22cfeeu, 0x00000000u,
-        /* merkle_root (8 words, LE): */
-        0xcb4c10ffu, 0xb91a4205u, 0xc3f8633eu, 0x2e2c5cceu,
-        0xde37bb9du, 0xa3b36427u, 0x66815c17u, 0x7dac2c56u,
-        /* timestamp, bits, nonce (LE): */
-        0x496ab951u,
-        0x1d00ffffu,
-        0x709e3e28u
-    };
-
-    /* Byte-swap to big-endian for SHA-256 processing */
-    unsigned int header_be[20];
-    for (i = 0; i < 20; i++)
-        header_be[i] = bswap32(header_le[i]);
-
-    /* --- Compute midstate on ARM: SHA-256 compress chunk 1 (words 0-15) --- */
-    unsigned int chunk1[16];
-    for (i = 0; i < 16; i++) chunk1[i] = header_be[i];
-
-    unsigned int midstate[MIDSTATE_WORDS];
-    sha256_compress_sw(SHA256_H_INIT, chunk1, midstate);
-
-    /* --- Extract chunk 2 tail: header words 16, 17, 18 (BE) --- */
-    unsigned int chunk2_tail[CHUNK2_TAIL_WORDS] = {
-        header_be[16], header_be[17], header_be[18]
-    };
-
-    /* --- Mining parameters --- */
-    unsigned int known_nonce_be = header_be[19];  /* 0x709e3e28 */
-    unsigned int nonce_start    = known_nonce_be - 16;
-    unsigned int nonce_end      = known_nonce_be + 16;
-    unsigned int target_hi      = 0x00000000u;  /* difficulty 1 */
-
-    /* --- Result variables --- */
-    unsigned int hw_nonce, hw_mining_status;
-    unsigned int sw_nonce, sw_mining_status;
+    int total_errors = 0;
+    unsigned int i;
 
     /* =========================================================================
      * Platform initialization
@@ -245,162 +372,71 @@ int main(void)
     printf("\r\n");
     printf("############################################################\r\n");
     printf("#                                                          #\r\n");
-    printf("#      PICO MINER -- Bitcoin SHA-256 FPGA Accelerator      #\r\n");
-    printf("#         ARM Driver (Zynq PS) + HLS IP (PL)               #\r\n");
+    printf("#      PICO MINER -- Real Bitcoin Mining on FPGA           #\r\n");
+    printf("#        Double-SHA-256 with Midstate Optimization          #\r\n");
+    printf("#         ARM (Zynq PS) + HLS Accelerator (PL)             #\r\n");
+    printf("#                                                          #\r\n");
+    printf("#  This driver mines REAL Bitcoin blocks using the same    #\r\n");
+    printf("#  algorithm used by every miner since January 2009.       #\r\n");
     printf("#                                                          #\r\n");
     printf("############################################################\r\n");
     printf("\r\n");
 
-    printf("[INFO] Test vector: Bitcoin Block 170\r\n");
-    printf("[INFO] Known nonce (BE): 0x%08X\r\n", known_nonce_be);
-    printf("[INFO] Nonce search range: [0x%08X, 0x%08X)\r\n",
-           nonce_start, nonce_end);
-    printf("[INFO] Target (hi word): 0x%08X\r\n", target_hi);
-    printf("\r\n");
-
-    printf("[ARM] Midstate: ");
-    for (i = 0; i < 8; i++) printf("%08x ", midstate[i]);
-    printf("\r\n");
-    printf("[ARM] Chunk2 tail: [%08x, %08x, %08x]\r\n",
-           chunk2_tail[0], chunk2_tail[1], chunk2_tail[2]);
-    printf("\r\n");
-
     /* =========================================================================
-     * Step 1: Initialize HLS IP
+     * Initialize HLS IP
      * ========================================================================= */
     printf("[INIT] Looking up Pico Miner IP configuration...\r\n");
-    Pico_miner_cfg_ptr = XPico_miner_LookupConfig(XPAR_PICO_MINER_0_DEVICE_ID);
+    cfg_ptr = XPico_miner_LookupConfig(XPAR_PICO_MINER_0_DEVICE_ID);
 
-    if (!Pico_miner_cfg_ptr) {
-        printf("[ERROR] Could not find Pico Miner IP configuration!\r\n");
-        printf("[ERROR] Check that the IP is instantiated in the block design.\r\n");
+    if (!cfg_ptr) {
+        printf("[ERROR] Could not find Pico Miner IP!\r\n");
         Xil_DCacheDisable();
         Xil_ICacheDisable();
         return XST_FAILURE;
     }
 
-    hw_status_init = XPico_miner_CfgInitialize(&Pico_miner_inst,
-                                                 Pico_miner_cfg_ptr);
+    hw_status_init = XPico_miner_CfgInitialize(&inst, cfg_ptr);
     if (hw_status_init != XST_SUCCESS) {
-        printf("[ERROR] Failed to initialize Pico Miner IP (status=%d)\r\n",
+        printf("[ERROR] Failed to initialize IP (status=%d)\r\n",
                hw_status_init);
         Xil_DCacheDisable();
         Xil_ICacheDisable();
         return XST_FAILURE;
     }
-    printf("[INIT] Pico Miner IP initialized successfully.\r\n\r\n");
+    printf("[INIT] Pico Miner IP initialized.\r\n\r\n");
 
     /* =========================================================================
-     * Step 2: Write mining parameters to HLS IP via AXI-Lite
-     *
-     * Vivado HLS 2019.1 maps array arguments as individual scalar registers:
-     *   midstate[8]     -> Set_midstate_0 .. Set_midstate_7
-     *   chunk2_tail[3]  -> Set_chunk2_tail_0 .. Set_chunk2_tail_2
+     * Mine all three real Bitcoin blocks
      * ========================================================================= */
-    printf("[CONFIG] Writing midstate to FPGA...\r\n");
-    XPico_miner_Set_midstate_0(&Pico_miner_inst, midstate[0]);
-    XPico_miner_Set_midstate_1(&Pico_miner_inst, midstate[1]);
-    XPico_miner_Set_midstate_2(&Pico_miner_inst, midstate[2]);
-    XPico_miner_Set_midstate_3(&Pico_miner_inst, midstate[3]);
-    XPico_miner_Set_midstate_4(&Pico_miner_inst, midstate[4]);
-    XPico_miner_Set_midstate_5(&Pico_miner_inst, midstate[5]);
-    XPico_miner_Set_midstate_6(&Pico_miner_inst, midstate[6]);
-    XPico_miner_Set_midstate_7(&Pico_miner_inst, midstate[7]);
+    printf("============================================================\r\n");
+    printf("  Mining %u real Bitcoin blocks...\r\n", (unsigned int)NUM_BLOCKS);
+    printf("============================================================\r\n\r\n");
 
-    printf("[CONFIG] Writing chunk2 tail to FPGA...\r\n");
-    XPico_miner_Set_chunk2_tail_0(&Pico_miner_inst, chunk2_tail[0]);
-    XPico_miner_Set_chunk2_tail_1(&Pico_miner_inst, chunk2_tail[1]);
-    XPico_miner_Set_chunk2_tail_2(&Pico_miner_inst, chunk2_tail[2]);
-
-    printf("[CONFIG] Writing scalar parameters...\r\n");
-    XPico_miner_Set_nonce_start(&Pico_miner_inst, nonce_start);
-    XPico_miner_Set_nonce_end(&Pico_miner_inst, nonce_end);
-    XPico_miner_Set_target_hi(&Pico_miner_inst, target_hi);
-    printf("\r\n");
-
-    /* =========================================================================
-     * Step 3: Start hardware mining and wait for completion
-     * ========================================================================= */
-    printf("[MINING] Starting hardware miner...\r\n");
-    XPico_miner_Start(&Pico_miner_inst);
-
-    /* Poll ap_done flag */
-    printf("[MINING] Waiting for completion (polling ap_done)...\r\n");
-    while (!XPico_miner_IsDone(&Pico_miner_inst)) {
-        /* Busy wait -- in a real system you could use interrupts */
+    for (i = 0; i < NUM_BLOCKS; i++) {
+        total_errors += mine_block(&inst, &BLOCKS[i]);
     }
-    printf("[MINING] Hardware miner finished!\r\n\r\n");
 
     /* =========================================================================
-     * Step 4: Read results from HLS IP
+     * Summary
      * ========================================================================= */
-    hw_nonce         = XPico_miner_Get_found_nonce(&Pico_miner_inst);
-    hw_mining_status = XPico_miner_Get_status(&Pico_miner_inst);
+    printf("============================================================\r\n");
+    printf("  RESULTS SUMMARY\r\n");
+    printf("============================================================\r\n");
+    printf("  Blocks mined: %u / %u\r\n",
+           (unsigned int)(NUM_BLOCKS - total_errors), (unsigned int)NUM_BLOCKS);
+    printf("  Blocks: 1 (first after genesis), 170 (first tx), 181 (early)\r\n");
 
-    printf("[HW RESULT] Status: %s\r\n",
-           (hw_mining_status == MINING_FOUND) ? "FOUND" : "NOT FOUND");
-    if (hw_mining_status == MINING_FOUND) {
-        printf("[HW RESULT] Winning nonce (BE): 0x%08X\r\n", hw_nonce);
-        printf("[HW RESULT] Winning nonce (LE): 0x%08X\r\n", bswap32(hw_nonce));
-    }
-    printf("\r\n");
-
-    /* =========================================================================
-     * Step 5: Run software golden model and compare
-     * ========================================================================= */
-    printf("[SW] Running software reference miner for verification...\r\n");
-    pico_miner_sw(midstate, chunk2_tail, nonce_start, nonce_end,
-                  target_hi, &sw_nonce, &sw_mining_status);
-
-    if (sw_mining_status == MINING_FOUND) {
-        printf("[SW RESULT] Winning nonce (BE): 0x%08X\r\n", sw_nonce);
+    if (total_errors == 0) {
+        printf("\r\n");
+        printf("  >>> ALL BLOCKS MINED SUCCESSFULLY <<<\r\n");
+        printf("  >>> REAL BITCOIN MINING VERIFIED ON FPGA <<<\r\n");
     } else {
-        printf("[SW RESULT] Not found in range.\r\n");
-    }
-    printf("\r\n");
-
-    /* =========================================================================
-     * Step 6: Compare SW vs HW results
-     * ========================================================================= */
-    printf("============================================================\r\n");
-    printf("           SW vs HW Comparison\r\n");
-    printf("============================================================\r\n");
-    printf("  Status:  SW=%u  HW=%u  %s\r\n",
-           sw_mining_status, hw_mining_status,
-           (sw_mining_status == hw_mining_status) ? "[OK]" : "[MISMATCH]");
-    printf("  Nonce:   SW=0x%08X  HW=0x%08X  %s\r\n",
-           sw_nonce, hw_nonce,
-           (sw_nonce == hw_nonce) ? "[OK]" : "[MISMATCH]");
-    printf("============================================================\r\n");
-
-    if (sw_mining_status == hw_mining_status && sw_nonce == hw_nonce) {
-        printf("\r\n  >>> ALL RESULTS MATCH -- VERIFICATION PASSED <<<\r\n");
-    } else {
-        printf("\r\n  >>> MISMATCH DETECTED -- VERIFICATION FAILED <<<\r\n");
-    }
-
-    /* =========================================================================
-     * Additional: Verify against known Block 170 nonce
-     * ========================================================================= */
-    printf("\r\n");
-    printf("============================================================\r\n");
-    printf("           Block 170 Nonce Check\r\n");
-    printf("============================================================\r\n");
-    if (hw_mining_status == MINING_FOUND && hw_nonce == known_nonce_be) {
-        printf("  HW nonce matches Bitcoin Block 170 nonce: [OK]\r\n");
-    } else if (hw_mining_status == MINING_FOUND) {
-        printf("  HW found nonce 0x%08X (differs from known 0x%08X)\r\n",
-               hw_nonce, known_nonce_be);
-        printf("  (May be another valid nonce in the search range)\r\n");
-    } else {
-        printf("  HW did not find a valid nonce: [FAIL]\r\n");
+        printf("\r\n");
+        printf("  >>> %d BLOCK(S) FAILED <<<\r\n", total_errors);
     }
     printf("============================================================\r\n");
     printf("\r\n");
 
-    /* =========================================================================
-     * Cleanup
-     * ========================================================================= */
     Xil_DCacheDisable();
     Xil_ICacheDisable();
     return 0;

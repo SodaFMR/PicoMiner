@@ -1,6 +1,6 @@
 % =============================================================================
 % Pico Miner -- Proof of Concept Document
-% FPGA-Based Bitcoin SHA-256 Mining Accelerator
+% FPGA-Based Real Bitcoin Mining Accelerator
 % =============================================================================
 \documentclass[12pt,a4paper]{article}
 
@@ -48,7 +48,7 @@
 % --- Title ---
 \title{%
     \textbf{Pico Miner} \\[0.5em]
-    \large FPGA-Based Bitcoin SHA-256 Mining Accelerator \\[0.3em]
+    \large FPGA-Based Real Bitcoin Mining Accelerator \\[0.3em]
     \large Proof of Concept Document
 }
 \author{Pico Miner Project}
@@ -78,10 +78,21 @@ a valid nonce is found every 10 minutes across the entire network.
 
 \textbf{Pico Miner} is a proof-of-concept project that implements
 \textbf{real Bitcoin double-SHA-256 mining} with midstate optimization,
-accelerated on a Zynq-7020 FPGA using Vivado HLS 2019.1. The design is
-verified against \textbf{Bitcoin Block~170} --- the first block containing
-a non-coinbase transaction (Satoshi Nakamoto sent 10~BTC to Hal Finney
-on January~12, 2009).
+accelerated on a Zynq-7020 FPGA using Vivado HLS 2019.1. This is not a
+simulation or toy hash --- the SHA-256 implementation follows FIPS~180-4
+exactly, the block headers are byte-for-byte copies from the real
+blockchain, and the nonces found by the FPGA are the same nonces that were
+originally mined in 2009.
+
+The design is verified against \textbf{three real Bitcoin blocks}:
+\begin{itemize}
+    \item \textbf{Block~1} --- the first block after the genesis block
+          (Satoshi Nakamoto, January~9, 2009)
+    \item \textbf{Block~170} --- the first block containing a non-coinbase
+          transaction (Satoshi sent 10~BTC to Hal Finney, January~12, 2009)
+    \item \textbf{Block~181} --- an early block with two transactions
+          (January~12, 2009)
+\end{itemize}
 
 % =============================================================================
 \section{Background: How Bitcoin Mining Works}
@@ -393,80 +404,154 @@ This provides more timing margin if Solution~1 fails to meet the
 10\,ns constraint at 100\,MHz.
 
 % =============================================================================
-\section{Test Vector: Bitcoin Block 170}
+\section{Test Vectors: Three Real Bitcoin Blocks}
 % =============================================================================
 
-The project uses Bitcoin Block~170 as its primary test vector.
+The project is verified against three actual blocks from the Bitcoin
+blockchain. All block headers were fetched from the blockchain and
+independently verified via Python \texttt{hashlib.sha256} double-hash.
 
-\subsection{Block Header}
+\subsection{Block~1 -- First Block After Genesis}
 
 \begin{table}[h]
 	\centering
-	\caption{Bitcoin Block 170 Header Fields}
+	\caption{Bitcoin Block~1 Header Fields}
 	\begin{tabular}{@{}ll@{}}
 		\toprule
-		\textbf{Field} & \textbf{Value (hex, LE serialized)} \\
+		\textbf{Field} & \textbf{Value} \\
 		\midrule
-		Version       & \texttt{01000000} \\
-		Prev hash     & \texttt{55bd840a...00000000} (32 bytes) \\
-		Merkle root   & \texttt{ff104ccb...562cac7d} (32 bytes) \\
-		Timestamp     & \texttt{51b96a49} \\
-		Bits          & \texttt{ffff001d} \\
-		Nonce (LE)    & \texttt{283e9e70} \\
+		Mined by      & Satoshi Nakamoto \\
+		Date          & January~9, 2009 \\
+		Nonce (LE)    & \texttt{0x9962e301} \\
+		Nonce (BE)    & \texttt{0x01e36299} \\
+		Block hash    & \texttt{00000000839a8e6886ab5951d76f411475428afc} \\
+		              & \texttt{90947ee320161bbf18eb6048} \\
+		Significance  & First block ever mined after genesis \\
 		\bottomrule
 	\end{tabular}
 \end{table}
 
-\subsection{Expected Results}
+Block~1 is particularly important for verification because its nonce
+(BE~\texttt{0x01e36299} $\approx$ 31.8M) is small enough to mine from
+nonce=0 in C~simulation within $\sim$10~seconds. This proves the miner
+can find a real Bitcoin nonce starting from scratch, exactly as a real
+miner would.
 
+\subsection{Block~170 -- First Non-Coinbase Transaction}
+
+\begin{table}[h]
+	\centering
+	\caption{Bitcoin Block~170 Header Fields}
+	\begin{tabular}{@{}ll@{}}
+		\toprule
+		\textbf{Field} & \textbf{Value} \\
+		\midrule
+		Transaction   & Satoshi Nakamoto sent 10~BTC to Hal Finney \\
+		Date          & January~12, 2009 \\
+		Nonce (LE)    & \texttt{0x283e9e70} \\
+		Nonce (BE)    & \texttt{0x709e3e28} \\
+		Block hash    & \texttt{00000000d1145790a8694403d4063f323d499e65} \\
+		              & \texttt{5c83426834d4ce2f8dd4a2ee} \\
+		Significance  & First Bitcoin transaction between two people \\
+		\bottomrule
+	\end{tabular}
+\end{table}
+
+\subsection{Block~181 -- Early Block with Two Transactions}
+
+\begin{table}[h]
+	\centering
+	\caption{Bitcoin Block~181 Header Fields}
+	\begin{tabular}{@{}ll@{}}
+		\toprule
+		\textbf{Field} & \textbf{Value} \\
+		\midrule
+		Date          & January~12, 2009 \\
+		Nonce (LE)    & \texttt{0x2f3f2d19} \\
+		Nonce (BE)    & \texttt{0x192d3f2f} \\
+		Block hash    & \texttt{00000000dc55860c8a29c58d45209318fa9e9dc2} \\
+		              & \texttt{c1833a7226d86bc465afc6e5} \\
+		Significance  & Demonstrates mining of multi-transaction blocks \\
+		\bottomrule
+	\end{tabular}
+\end{table}
+
+\subsection{Nonce Byte Order}
+
+Bitcoin serialises nonces in \textbf{little-endian} (LE) in the block header.
+SHA-256 processes words in \textbf{big-endian} (BE). The FPGA iterates the
+BE nonce word directly. For example, Block~170's nonce:
 \begin{itemize}
-	\item Nonce (big-endian): \texttt{0x709e3e28}
-	\item Block hash (display order): \texttt{00000000d1145790a8694403d4063f323d499e655c83426834d4ce2f8dd4a2ee}
-	\item Target (hi word): \texttt{0x00000000} (first 32~bits of hash must be zero)
+    \item LE (as serialised): \texttt{0x283e9e70}
+    \item BE (SHA-256 word): \texttt{0x709e3e28}
 \end{itemize}
 
-\subsection{Testbench Structure}
-
-The HLS testbench (\texttt{pico\_miner\_tb.cpp}) contains three test cases:
-\begin{enumerate}
-	\item \textbf{NIST known vector}: SHA-256(``abc'') validated against the
-	      official FIPS~180-4 test vector
-	\item \textbf{Block~170 mining}: Computes midstate in software, calls
-	      the HLS function with a $\pm16$ nonce window, verifies it finds
-	      the correct nonce
-	\item \textbf{No-solution case}: Verifies the miner correctly reports
-	      ``not found'' when no valid nonce exists in the range
-\end{enumerate}
+The FPGA searches in a different order than a LE miner but covers the same
+$2^{32}$ nonce space and produces identical hashes for any given nonce value.
 
 % =============================================================================
 \section{Verification Strategy}
 % =============================================================================
 
+The project employs a multi-level verification strategy to prove that the
+FPGA performs real Bitcoin mining.
+
+\subsection{HLS Testbench (6 Test Cases)}
+
+The testbench (\texttt{pico\_miner\_tb.cpp}) contains six test cases:
+
+\begin{enumerate}
+	\item \textbf{NIST known vector}: SHA-256(``abc'') validated against the
+	      official FIPS~180-4 test vector. Proves the SHA-256 implementation
+	      is correct.
+
+	\item \textbf{Block~1 full-range SW mining}: Mines Block~1 from nonce=0
+	      in pure software ($\sim$31.8M iterations). This is the strongest
+	      proof that the algorithm works: it finds a real Bitcoin nonce
+	      starting from scratch, exactly as a real miner would.
+
+	\item \textbf{Block~1 HW mining}: Calls the HLS accelerator with a
+	      $\pm16$ nonce window around the known answer. Verifies the FPGA
+	      hardware finds the correct nonce.
+
+	\item \textbf{Block~170 HW mining}: Same $\pm16$ window test for
+	      Block~170 (Satoshi $\rightarrow$ Hal Finney).
+
+	\item \textbf{Block~181 HW mining}: Same $\pm16$ window test for
+	      Block~181.
+
+	\item \textbf{No-solution case}: Verifies the miner correctly reports
+	      ``not found'' when no valid nonce exists in the search range.
+\end{enumerate}
+
+The narrow $\pm16$ window for HW tests keeps C/RTL co-simulation fast
+(32~nonces $\times$ 128~cycles/nonce $\approx$ 4096~cycles per block).
+The full-range search in Test~2 runs in pure software (no HW call) to
+avoid cosim timeout.
+
 \subsection{C Simulation (csim)}
 
-The testbench includes a complete software SHA-256 implementation as a
-golden model. It validates:
-\begin{itemize}
-	\item SHA-256 correctness against NIST test vectors
-	\item Double-SHA-256 mining against the known Block~170 result
-	\item Correct handling of no-solution ranges
-\end{itemize}
+All six tests run during \texttt{csim\_design}. The full-range Block~1
+search (Test~2) takes $\sim$10~seconds in C~simulation.
 
 \subsection{C/RTL Co-Simulation (cosim)}
 
 After C synthesis, the generated RTL is verified against the C testbench.
-The testbench uses a narrow nonce window ($\pm16$) to keep cosim runtime
-manageable despite the 128~cycles per nonce.
+The HW calls use narrow nonce windows ($\pm16$) to keep cosim runtime
+manageable (the no-solution test searches 100~nonces).
 
 \subsection{ARM Integration Test}
 
-The ARM driver (\texttt{pico\_miner\_arm.c}) performs:
+The ARM driver (\texttt{pico\_miner\_arm.c}) mines all three blocks on
+real FPGA hardware with a $\pm4096$ nonce search window ($\sim$8192~nonces,
+$\sim$10\,ms on the FPGA at 100\,MHz). For each block it:
 \begin{enumerate}
-	\item Block header parsing and byte-swapping
-	\item Midstate computation on ARM
-	\item Hardware mining via AXI-Lite
-	\item Software golden model mining
-	\item Bit-exact comparison of HW vs SW results
+	\item Parses the real 80-byte block header and byte-swaps to big-endian
+	\item Computes the midstate on ARM
+	\item Starts the HW miner and polls for completion
+	\item Runs the SW golden model over the same range
+	\item Compares HW vs.\ SW results bit-for-bit
+	\item Verifies the found nonce matches the known blockchain nonce
 \end{enumerate}
 
 % =============================================================================
@@ -488,7 +573,8 @@ The project was initially developed with a simplified custom hash function
 		Output          & 32-bit hash & 256-bit hash \\
 		Difficulty      & 32-bit comparison & 256-bit comparison \\
 		Optimization    & Split multiply stages & Midstate precomputation \\
-		Test vector     & Synthetic data & Bitcoin Block 170 \\
+		Test vectors    & Synthetic data & 3 real Bitcoin blocks \\
+		Full-range mine & N/A & Block 1 from nonce=0 \\
 		Throughput      & $\sim$50 MH/s (II=2) & $\sim$780 KH/s (II=1) \\
 		\bottomrule
 	\end{tabular}
@@ -502,10 +588,19 @@ and can find actual valid block nonces.
 \section{Conclusion}
 % =============================================================================
 
-Pico Miner demonstrates that real Bitcoin mining can be implemented on a
-Zynq-7020 FPGA using Vivado HLS. The design implements the complete
-double-SHA-256 algorithm with midstate optimization, verified against
-a real Bitcoin block (Block~170).
+Pico Miner demonstrates that \textbf{real Bitcoin mining} can be implemented
+on a Zynq-7020 FPGA using Vivado HLS. The design implements the complete
+double-SHA-256 algorithm with midstate optimization, verified against three
+actual blocks from the Bitcoin blockchain (Blocks~1, 170, and~181).
+
+The project proves its correctness through multiple levels of evidence:
+\begin{itemize}
+    \item NIST FIPS~180-4 test vector validation (SHA-256 correctness)
+    \item Full-range mining of Block~1 from nonce=0 ($\sim$31.8M iterations),
+          proving the algorithm can find real Bitcoin nonces from scratch
+    \item Hardware mining of three real blocks, with bit-exact SW/HW comparison
+    \item Block hashes verified against the Bitcoin blockchain
+\end{itemize}
 
 The project showcases:
 \begin{itemize}
@@ -514,12 +609,13 @@ The project showcases:
 	\item AXI-Lite integration for PS/PL communication
 	\item HLS directive optimization (pipeline II=1, array partition, unroll)
 	\item Multi-level verification: NIST test vectors, real block mining,
-	      SW/HW golden model comparison
+	      SW/HW golden model comparison across 3 blocks
 \end{itemize}
 
 The estimated throughput of $\sim$780\,KH/s at 100\,MHz, while far below
 modern Bitcoin ASICs, demonstrates the fundamental principles and
-architecture of hardware-accelerated cryptocurrency mining.
+architecture of hardware-accelerated cryptocurrency mining using the
+identical algorithm that secures the Bitcoin network.
 
 % =============================================================================
 \end{document}

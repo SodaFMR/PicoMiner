@@ -16,7 +16,10 @@
 #   Bitcoin double-SHA-256 mining with midstate optimization.
 #   ARM computes midstate (SHA-256 state after chunk 1 of the 80-byte header).
 #   FPGA iterates nonces over chunk 2 + second full SHA-256 (128 rounds/nonce).
-#   Test vector: Bitcoin Block 170 (Satoshi -> Hal Finney, nonce 0x709e3e28).
+#   Verified against 3 real Bitcoin blocks:
+#     Block 1   (first after genesis,   nonce BE 0x01e36299)
+#     Block 170 (Satoshi -> Hal Finney, nonce BE 0x709e3e28)
+#     Block 181 (early 2-tx block,      nonce BE 0x192d3f2f)
 #
 # Target FPGA: xc7z020clg484-1 (Zynq-7020, e.g. ZedBoard)
 # Clock: 10 ns (100 MHz)
@@ -107,7 +110,7 @@ puts " Pico Miner HLS -- All solutions completed successfully!"
 puts "============================================================"
 puts ""
 puts " Architecture: Bitcoin double-SHA-256 with midstate optimization"
-puts " Test vector:  Bitcoin Block 170 (nonce 0x709e3e28)"
+puts " Test vectors: Block 1 (0x01e36299), Block 170 (0x709e3e28), Block 181 (0x192d3f2f)"
 puts ""
 puts " IMPORTANT:"
 puts "   run_hls.tcl only builds/exports the HLS IP."
