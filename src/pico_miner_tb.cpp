@@ -3,24 +3,17 @@
  *
  * Description:
  *   Testbench for the Bitcoin double-SHA-256 mining accelerator.
- *   This testbench proves that the FPGA miner performs REAL Bitcoin mining
- *   by successfully mining actual blocks from the Bitcoin blockchain.
+ *   Verifies correctness using NIST test vectors and real Bitcoin blocks.
  *
- *   Blocks mined:
- *   - Block 1:   The first block after the genesis block (Jan 9, 2009)
- *   - Block 170: First block with a non-coinbase tx (Satoshi -> Hal Finney)
- *   - Block 181: Another early block with two transactions
- *
- *   The testbench:
- *   1. Validates SHA-256 against the NIST FIPS 180-4 test vector
- *   2. Mines Block 1 from nonce=0 in software (proves full-range mining)
- *   3. Mines Block 1 on the HW accelerator (narrow window for cosim speed)
- *   4. Mines Block 170 on the HW accelerator
- *   5. Mines Block 181 on the HW accelerator
- *   6. Tests the no-solution case
+ *   Test cases:
+ *   1. SHA-256 NIST FIPS 180-4 known vector: SHA-256("abc")
+ *   2. Block 1 full-range SW mining from nonce=0 (~31.8M iterations)
+ *   3. Block 1 HW mining (narrow window for cosim)
+ *   4. Block 939260 HW mining (narrow window for cosim) -- recent block
+ *   5. No-solution test
  *
  * Author: Pico Miner Project
- * Date: 2026
+ * Date:   2026
  * =============================================================================
  */
 
@@ -182,7 +175,7 @@ static int verify_block_hash_sw(const unsigned int header_le[20],
 }
 
 /* =============================================================================
- * Test Case 1: Validate SHA-256 against NIST FIPS 180-4 test vector
+ * Test Case 1: SHA-256 NIST FIPS 180-4 known vector
  *
  * SHA256("abc") = ba7816bf 8f01cfea 414140de 5dae2223
  *                 b00361a3 96177a9c b410ff61 f20015ad
@@ -230,21 +223,10 @@ static int test_sha256_known_vector(void)
 }
 
 /* =============================================================================
- * Test Case 2: Mine Bitcoin Block 1 from nonce=0 (software full-range search)
+ * Test Case 2: Mine Block 1 from nonce=0 (software full-range search)
  *
- * This test proves we can find a real Bitcoin nonce starting from zero,
- * exactly as a real miner would. It runs in pure software (no HW call)
- * so it works in both csim and cosim without timeout issues.
- *
- * Block 1 (first block after genesis):
- *   Raw header hex:
- *   01000000 6fe28c0ab6f1b372c1a6a246ae63f74f931e8365e15a089c68d61900
- *   00000000 982051fd1e4ba744bbbe680e1fee14677ba1a3c3540bf7b1cdb606e8
- *   57233e0e 61bc6649 ffff001d 01e36299
- *
- *   Nonce (LE uint32): 0x9962e301  (decimal: 2,573,394,689)
- *   Nonce (BE SHA-256 word): 0x01e36299
- *   Block hash: 00000000839a8e6886ab5951d76f411475428afc90947ee320161bbf18eb6048
+ * Block 1: first block after genesis (January 9, 2009)
+ * Nonce (BE): 0x01e36299, ~31.8M iterations from nonce=0
  * =============================================================================
  */
 static int test_mine_block1_full_range(void)
@@ -254,21 +236,17 @@ static int test_mine_block1_full_range(void)
 
     printf("\n");
     print_separator();
-    printf("TEST 2: Mine Bitcoin Block 1 -- Full Range Search from Nonce=0\n");
-    printf("  This is REAL Bitcoin mining: searching for Block 1's nonce\n");
-    printf("  starting from zero, exactly as Satoshi's CPU did in 2009.\n");
+    printf("TEST 2: Mine Block 1 -- Full Range Search from Nonce=0\n");
+    printf("  Brute-force search for Block 1's nonce (~31.8M iterations)\n");
     print_separator();
 
-    /* Block 1 header (20 little-endian 32-bit words) */
     unsigned int header_le[20] = {
-        0x00000001u,  /* version */
+        0x00000001u,
         0x0a8ce26fu, 0x72b3f1b6u, 0x46a2a6c1u, 0x4ff763aeu,
         0x65831e93u, 0x9c085ae1u, 0x0019d668u, 0x00000000u,
         0xfd512098u, 0x44a74b1eu, 0x0e68bebbu, 0x6714ee1fu,
         0xc3a3a17bu, 0xb1f70b54u, 0xe806b6cdu, 0x0e3e2357u,
-        0x4966bc61u,  /* timestamp */
-        0x1d00ffffu,  /* bits */
-        0x9962e301u   /* nonce (LE) */
+        0x4966bc61u, 0x1d00ffffu, 0x9962e301u
     };
 
     unsigned int midstate[8], chunk2_tail[3], known_nonce_be;
@@ -280,10 +258,9 @@ static int test_mine_block1_full_range(void)
     for (i = 0; i < 8; i++) printf("%08x ", midstate[i]);
     printf("\n");
 
-    /* Verify the block hash */
     errors += verify_block_hash_sw(header_le, "Block 1");
 
-    /* --- Full-range SW mining from nonce=0 --- */
+    /* Full-range SW mining from nonce=0 */
     printf("\n  [SW MINING] Searching from nonce_be=0x00000000...\n");
     printf("  [SW MINING] Target: find nonce_be=0x%08x\n", known_nonce_be);
     printf("  [SW MINING] This searches ~%u nonces...\n", known_nonce_be + 1);
@@ -298,7 +275,6 @@ static int test_mine_block1_full_range(void)
     unsigned int found_nonce_sw = 0;
 
     for (nonce = 0; nonce <= known_nonce_be + 100; nonce++) {
-        /* Build chunk 2 */
         unsigned int chunk2_W[16];
         chunk2_W[0]  = chunk2_tail[0];
         chunk2_W[1]  = chunk2_tail[1];
@@ -343,9 +319,7 @@ static int test_mine_block1_full_range(void)
 }
 
 /* =============================================================================
- * Generic HW mining test for a real Bitcoin block
- *
- * Uses a narrow nonce window (±16) around the known answer for fast cosim.
+ * Generic HW mining test (narrow nonce window for cosim)
  * =============================================================================
  */
 static int test_mine_block_hw(const unsigned int header_le[20],
@@ -373,7 +347,6 @@ static int test_mine_block_hw(const unsigned int header_le[20],
     printf("  Chunk2 tail: [%08x, %08x, %08x]\n",
            chunk2_tail[0], chunk2_tail[1], chunk2_tail[2]);
 
-    /* Verify block hash in SW */
     errors += verify_block_hash_sw(header_le, block_name);
     printf("  Expected:  %s\n", expected_hash_display);
 
@@ -409,14 +382,7 @@ static int test_mine_block_hw(const unsigned int header_le[20],
 }
 
 /* =============================================================================
- * Test Case 3: Mine Bitcoin Block 1 on HW
- *
- * Block 1 -- the first block after the genesis block.
- * Mined by Satoshi Nakamoto on January 9, 2009.
- *
- * Raw header: 010000006fe28c0ab6f1b372c1a6a246ae63f74f931e8365e15a089c
- *             68d6190000000000982051fd1e4ba744bbbe680e1fee14677ba1a3c354
- *             0bf7b1cdb606e857233e0e61bc6649ffff001d01e36299
+ * Test Case 3: Mine Block 1 on HW (narrow window)
  * =============================================================================
  */
 static int test_mine_block1_hw(void)
@@ -430,66 +396,40 @@ static int test_mine_block1_hw(void)
         0x4966bc61u, 0x1d00ffffu, 0x9962e301u
     };
     return test_mine_block_hw(header_le,
-        "Bitcoin Block 1",
-        "First block after genesis (Satoshi, Jan 9 2009)",
+        "Block 1",
+        "First block after genesis (January 9, 2009)",
         "00000000839a8e6886ab5951d76f411475428afc90947ee320161bbf18eb6048");
 }
 
 /* =============================================================================
- * Test Case 4: Mine Bitcoin Block 170 on HW
+ * Test Case 4: Mine Block 939260 on HW (narrow window)
  *
- * Block 170 -- the first block containing a non-coinbase transaction.
- * Satoshi Nakamoto sent 10 BTC to Hal Finney on January 12, 2009.
- *
- * Raw header: 0100000055bd840a78798ad0da853f68974f3d183e2bd1db6a842c1f
- *             eecf222a00000000ff104ccb05421ab93e63f8c3ce5c2c2e9dbb37de27
- *             64b3a3175c8166562cac7d51b96a49ffff001d283e9e70
+ * Block 939260 -- mined March 4, 2026
+ * Difficulty: 144,398,401,518,101
+ * Raw header:
+ *   0000003c 3c08f14a ad5cac28 2d1c8ca8 79310a24 15794de3 8e4e0100
+ *   00000000 00000000 fc9099f6 927218e1 2db0cc20 ef43657d 5a32cba9
+ *   3b8994ba 59a61054 ddf1af1b bf28a869 03f30117 080a741e
  * =============================================================================
  */
-static int test_mine_block170_hw(void)
+static int test_mine_block939260_hw(void)
 {
     unsigned int header_le[20] = {
-        0x00000001u,
-        0x0a84bd55u, 0xd08a7978u, 0x683f85dau, 0x183d4f97u,
-        0xdbd12b3eu, 0x1f2c846au, 0x2a22cfeeu, 0x00000000u,
-        0xcb4c10ffu, 0xb91a4205u, 0xc3f8633eu, 0x2e2c5cceu,
-        0xde37bb9du, 0xa3b36427u, 0x66815c17u, 0x7dac2c56u,
-        0x496ab951u, 0x1d00ffffu, 0x709e3e28u
+        0x3c000000u,
+        0x4af1083cu, 0x28ac5cadu, 0xa88c1c2du, 0x240a3179u,
+        0xe34d7915u, 0x00014e8eu, 0x00000000u, 0x00000000u,
+        0xf69990fcu, 0xe1187292u, 0x20ccb02du, 0x7d6543efu,
+        0xa9cb325au, 0xba94893bu, 0x5410a659u, 0x1baff1ddu,
+        0x69a828bfu, 0x1701f303u, 0x1e740a08u
     };
     return test_mine_block_hw(header_le,
-        "Bitcoin Block 170",
-        "First non-coinbase tx (Satoshi -> Hal Finney, 10 BTC, Jan 12 2009)",
-        "00000000d1145790a8694403d4063f323d499e655c83426834d4ce2f8dd4a2ee");
+        "Block 939260",
+        "Recent block (March 4, 2026) -- Difficulty: 144,398,401,518,101",
+        "000000000000000000017588478b3612182486d33006ede1164fb146fa41cd06");
 }
 
 /* =============================================================================
- * Test Case 5: Mine Bitcoin Block 181 on HW
- *
- * Block 181 -- another early block with two transactions.
- *
- * Raw header: 01000000f2c8a8d2af43a9cd05142654e56f41d159ce0274d9cabe15
- *             a20eefb500000000366c2a0915f05db4b450c050ce7165acd55f823fee
- *             51430a8c993e0bdbb192ede5dc6a49ffff001d192d3f2f
- * =============================================================================
- */
-static int test_mine_block181_hw(void)
-{
-    unsigned int header_le[20] = {
-        0x00000001u,
-        0xd2a8c8f2u, 0xcda943afu, 0x54261405u, 0xd1416fe5u,
-        0x7402ce59u, 0x15becad9u, 0xb5ef0ea2u, 0x00000000u,
-        0x092a6c36u, 0xb45df015u, 0x50c050b4u, 0xac6571ceu,
-        0x3f825fd5u, 0x0a4351eeu, 0x0b3e998cu, 0xed92b1dbu,
-        0x496adce5u, 0x1d00ffffu, 0x2f3f2d19u
-    };
-    return test_mine_block_hw(header_le,
-        "Bitcoin Block 181",
-        "Early block with two transactions (Jan 12 2009)",
-        "00000000dc55860c8a29c58d45209318fa9e9dc2c1833a7226d86bc465afc6e5");
-}
-
-/* =============================================================================
- * Test Case 6: No valid nonce in range
+ * Test Case 5: No valid nonce in range
  * =============================================================================
  */
 static int test_no_solution(void)
@@ -498,7 +438,7 @@ static int test_no_solution(void)
 
     printf("\n");
     print_separator();
-    printf("TEST 6: No Solution in Range\n");
+    printf("TEST 5: No Solution in Range\n");
     print_separator();
 
     unsigned int midstate[8] = {
@@ -535,10 +475,7 @@ int main(void)
     printf("################################################################\n");
     printf("#                                                              #\n");
     printf("#         PICO MINER -- Bitcoin SHA-256 HLS Testbench          #\n");
-    printf("#      Real Bitcoin Mining on FPGA (Zynq-7020 / ZedBoard)      #\n");
-    printf("#                                                              #\n");
-    printf("#  This testbench mines REAL Bitcoin blocks using the same     #\n");
-    printf("#  double-SHA-256 algorithm used by every Bitcoin miner.       #\n");
+    printf("#           Zynq-7020 (ZedBoard) + Vivado HLS 2019.1          #\n");
     printf("#                                                              #\n");
     printf("################################################################\n");
 
@@ -551,21 +488,16 @@ int main(void)
     /* Test 3: Mine Block 1 on HW accelerator (narrow window) */
     total_errors += test_mine_block1_hw();
 
-    /* Test 4: Mine Block 170 on HW accelerator (narrow window) */
-    total_errors += test_mine_block170_hw();
+    /* Test 4: Mine Block 939260 on HW accelerator (narrow window) */
+    total_errors += test_mine_block939260_hw();
 
-    /* Test 5: Mine Block 181 on HW accelerator (narrow window) */
-    total_errors += test_mine_block181_hw();
-
-    /* Test 6: No valid nonce in range */
+    /* Test 5: No valid nonce in range */
     total_errors += test_no_solution();
 
     printf("\n");
     print_separator();
     if (total_errors == 0) {
-        printf("ALL TESTS PASSED\n");
-        printf("  Successfully mined 3 real Bitcoin blocks (1, 170, 181)\n");
-        printf("  using the identical double-SHA-256 algorithm as Bitcoin.\n");
+        printf("ALL TESTS PASSED (%d tests)\n", 5);
     } else {
         printf("FAILED: %d error(s) detected.\n", total_errors);
     }
