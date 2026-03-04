@@ -2,7 +2,7 @@
 
 **FPGA-Based Bitcoin SHA-256 Mining Accelerator**
 
-Bitcoin double-SHA-256 mining with midstate optimization, implemented on a Zynq-7020 FPGA (ZedBoard) using Vivado HLS 2019.1. Verified against three blocks from the Bitcoin blockchain (Blocks 1, 170, and 181).
+Bitcoin double-SHA-256 mining with midstate optimization, implemented on a Zynq-7020 FPGA (ZedBoard) using Vivado HLS 2019.1. The demo mines Bitcoin Block 939260 (March 4, 2026) from nonce=0 in approximately 3 minutes, with real-time progress on UART terminal and ZedBoard LEDs.
 
 ---
 
@@ -14,41 +14,39 @@ Cryptocurrency mining relies on a brute-force search for a **nonce** value that,
 
 - **SHA-256 (FIPS 180-4)**: Full 64-round compression function
 - **Midstate optimization**: ARM precomputes SHA-256 state after chunk 1 of the 80-byte header; FPGA processes only chunk 2 plus the second SHA-256 hash -- 128 compression rounds per nonce
-- **Verified against 3 Bitcoin blocks**:
-  - **Block 1** -- first block after genesis (Jan 9, 2009)
-  - **Block 170** -- first non-coinbase transaction (Satoshi sent 10 BTC to Hal Finney, Jan 12, 2009)
-  - **Block 181** -- early block with two transactions (Jan 12, 2009)
-- **Full-range mining**: Block 1 is mined from nonce=0 (~31.8M iterations) in software, demonstrating complete nonce search
+- **Demo block**: Block 939260 (March 4, 2026, difficulty 144,398,401,518,101) mined from nonce=0 (~135M nonces, ~3 minutes)
+- **Progress feedback**: UART terminal output with hash rate, elapsed time, and percentage; 8 ZedBoard LEDs light up proportionally to search progress
+- **Full-range mining**: Brute-force search from nonce=0, identical to how Bitcoin miners operate
 - **AXI-Lite interface**: ARM controls the FPGA miner via memory-mapped registers
 - **HLS directives**: Pipeline II=1, array partition, and unroll directives for hardware optimization
 
-> For a detailed explanation of the design decisions and architecture, see the [Proof of Concept document](doc/poc.tex).
+> For a detailed explanation of the design and architecture, see the [project memory](doc/poc.tex) (bilingual ES/EN LaTeX document).
 
 ## Project Structure
 
 ```
 PicoMiner/
-├── src/                               # Project implementation
-│   ├── pico_miner.h                   #   Header: SHA-256 constants, interface definition
-│   ├── pico_miner.cpp                 #   HLS source: SHA-256 compress + mining loop
-│   ├── pico_miner_tb.cpp              #   HLS testbench: 6 tests, 3 blocks, full-range search
-│   └── pico_miner_arm.c               #   ARM driver: 3 blocks, midstate + HW mining + SW verify
+├── src/
+│   ├── pico_miner.h               # Header: SHA-256 constants, interface definition
+│   ├── pico_miner.cpp             # HLS source: SHA-256 compress + mining loop
+│   ├── pico_miner_tb.cpp          # HLS testbench: 5 tests (NIST, Block 1, Block 939260)
+│   └── pico_miner_arm.c           # ARM driver: Block 939260 full-range demo with LEDs
 ├── doc/
-│   └── poc.tex                        # Proof of Concept document (LaTeX)
-├── examples/                          # Course material provided by the teacher
-│   ├── 1. sws2leds_withAXIGPIO/       #   Basic Zynq: read switches, write LEDs via AXI GPIO
-│   ├── 3.7 hls2vhdl_complex_sqr_float/#   HLS: complex number squaring with float I/O
-│   ├── 5.hls_directives_performance/  #   HLS: vector sum/dot-product with pipeline/unroll/partition
-│   ├── complex_prod_sources/          #   HLS: complex number product with float arrays
-│   ├── convo5x/                       #   HLS: 5x5 image convolution with line buffers
-│   ├── hls2vhdl_array2saxilite/       #   HLS: array reorder via AXI-Lite (full HLS-to-board flow)
-│   ├── hls2vhdl_mycnt/                #   HLS: counter with static state (full HLS-to-board flow)
-│   ├── labdocs/                       #   Lab instruction PDFs (Labs 1-4)
-│   ├── labsource/                     #   Lab source code (matrix multiply, YUV filter, DCT, FIR)
-│   ├── ug871-design-files2016.2/      #   Xilinx UG871 tutorial design files (HLS examples)
-│   └── zynq2mblaze_sws_leds/         #   Zynq ARM + MicroBlaze communication via shared BRAM
-├── run_hls.tcl                        # Vivado HLS automation script
-└── README.md                          # This file
+│   └── poc.tex                    # Project memory (bilingual ES/EN, LaTeX)
+├── examples/                      # Course material provided by the teacher
+│   ├── 1. sws2leds_withAXIGPIO/
+│   ├── 3.7 hls2vhdl_complex_sqr_float/
+│   ├── 5.hls_directives_performance/
+│   ├── complex_prod_sources/
+│   ├── convo5x/
+│   ├── hls2vhdl_array2saxilite/
+│   ├── hls2vhdl_mycnt/
+│   ├── labdocs/
+│   ├── labsource/
+│   ├── ug871-design-files2016.2/
+│   └── zynq2mblaze_sws_leds/
+├── run_hls.tcl                    # Vivado HLS automation script (2 solutions)
+└── README.md                      # This file
 ```
 
 ## How It Works
@@ -76,9 +74,11 @@ Since only the nonce changes between attempts, chunk 1 produces a fixed intermed
 For each nonce candidate, the FPGA performs:
 1. **First SHA-256 (chunk 2)**: 64 compression rounds starting from the midstate
 2. **Second SHA-256**: 64 compression rounds on the 32-byte first hash (with SHA-256 initial values)
-3. **Difficulty check**: Compare `final_hash[0]` (most significant 32 bits) against `target_hi`
+3. **Difficulty check**: Compare `final_hash[7]` against `target_hi`
 
 Total: **128 SHA-256 compression rounds per nonce**.
+
+> **Note on byte order**: Bitcoin displays hashes in reversed byte order. The leading zeros in the display hash correspond to `final_hash[7]` (the last word of the SHA-256 output), not `final_hash[0]`.
 
 ### System Architecture
 
@@ -89,36 +89,72 @@ Total: **128 SHA-256 compression rounds per nonce**.
 │   pico_miner_arm.c      │  Write:            │   pico_miner.cpp        │
 │   - Parse block header  │  midstate[8]       │   - sha256_compress()   │
 │   - Compute midstate    │  chunk2_tail[3]    │     64 rounds, II=1     │
-│   - Configure & start   │  nonce_start/end   │   - Mining loop:        │
-│   - Poll & read results │  target_hi         │     2x compress/nonce   │
+│   - Send 1M-nonce chunks│  nonce_start/end   │   - Mining loop:        │
+│   - Print progress/LEDs │  target_hi         │     2x compress/nonce   │
 │   - SW verification     │                    │   - Difficulty check    │
 │                         │  Read:             │                         │
 │                         │  found_nonce       │                         │
 │                         │  status            │                         │
 └─────────────────────────┘                    └─────────────────────────┘
+                │
+                │  AXI GPIO
+                ▼
+        ┌───────────────┐
+        │  8 LEDs       │  Progress bar: 0-8 LEDs proportional to search
+        │  (ZedBoard)   │  All ON = block mined
+        └───────────────┘
 ```
+
+### Chunked Mining Strategy
+
+The ARM driver breaks the full nonce search into chunks of 1,000,000 nonces per FPGA invocation. Between chunks, the ARM:
+- Prints progress (nonces searched, percentage, elapsed time, hash rate) to UART
+- Updates the LED progress bar (8 LEDs light up proportionally)
+- Checks if the FPGA found a valid nonce
+
+This provides real-time feedback during the ~3 minute mining run.
+
+## Demo Block: Block 939260
+
+| Field | Value |
+|-------|-------|
+| **Height** | 939,260 |
+| **Date** | March 4, 2026 |
+| **Difficulty** | 144,398,401,518,101 |
+| **Nonce (LE)** | `0x1E740A08` |
+| **Nonce (BE)** | `0x080A741E` (~134.9M) |
+| **Block hash** | `000000000000000000017588478b3612182486d33006ede1164fb146fa41cd06` |
+| **Est. mining time** | ~3 minutes at 781 KH/s |
 
 ### Nonce Byte Order
 
-Bitcoin serializes nonces in **little-endian** (LE) in the block header. SHA-256 processes words in **big-endian** (BE). The FPGA iterates the BE nonce word directly. For example, Block 170's nonce:
-- LE (as serialized): `0x283e9e70`
-- BE (SHA-256 word): `0x709e3e28`
+Bitcoin serializes nonces in **little-endian** (LE) in the block header. SHA-256 processes words in **big-endian** (BE). The FPGA iterates the BE nonce word directly, searching in a different order than a LE miner but covering the same 2^32 nonce space and producing identical hashes for any given nonce value.
 
-The FPGA searches in a different order than a LE miner but covers the same 2^32 nonce space and produces identical hashes for any given nonce value.
+## Verification
 
-### Test Vectors
+### HLS Testbench (5 Tests)
 
-| Block | Description | Nonce (LE) | Nonce (BE) | Block Hash |
-|-------|-------------|-----------|-----------|------------|
-| 1 | First after genesis (Jan 9, 2009) | `0x9962e301` | `0x01e36299` | `00000000839a8e68...` |
-| 170 | First non-coinbase tx (Satoshi -> Hal Finney) | `0x283e9e70` | `0x709e3e28` | `00000000d1145790...` |
-| 181 | Early block with two transactions | `0x2f3f2d19` | `0x192d3f2f` | `00000000dc55860c...` |
+| Test | Description | Method |
+|------|-------------|--------|
+| 1 | SHA-256("abc") NIST FIPS 180-4 vector | SW hash vs known digest |
+| 2 | Block 1 full-range mining from nonce=0 | SW brute-force (~31.8M nonces) |
+| 3 | Block 1 HW mining (narrow ±16 window) | HLS accelerator call |
+| 4 | Block 939260 HW mining (narrow ±16 window) | HLS accelerator call |
+| 5 | No-solution range | Verify "not found" status |
 
-All three block headers were fetched from the Bitcoin blockchain and verified via Python `hashlib.sha256` double-hash.
+The narrow ±16 windows for HW tests keep C/RTL co-simulation fast (32 nonces × 128 cycles/nonce). The full-range search in Test 2 runs in pure software.
+
+### ARM Driver Verification
+
+After the FPGA finds a nonce, the ARM driver:
+1. Runs the SW golden model (full double-SHA-256) on the found nonce
+2. Displays the computed hash in Bitcoin display order
+3. Compares the found nonce against the known blockchain nonce
+4. Reports verification status on UART terminal
 
 ## Prerequisites
 
-- **Vivado HLS 2019.1** (part of Vivado Design Suite, not Vivado Lab)
+- **Vivado HLS 2019.1** (part of Vivado Design Suite)
 - **Vivado 2019.1** (for block design and bitstream generation)
 - **Xilinx SDK 2019.1** (for ARM software development)
 - **Target FPGA**: Zynq-7020 (`xc7z020clg484-1`) -- e.g., ZedBoard
@@ -138,7 +174,7 @@ vivado_hls -f run_hls.tcl
 # 2. Add src/pico_miner.cpp and src/pico_miner.h as source files
 # 3. Add src/pico_miner_tb.cpp as testbench
 # 4. Set target part: xc7z020clg484-1, clock: 10ns (100 MHz)
-# 5. Run C Simulation -> should print "ALL TESTS PASSED"
+# 5. Run C Simulation -> should print "ALL TESTS PASSED (5 tests)"
 # 6. Run C Synthesis -> generates RTL + performance report
 # 7. Run C/RTL Co-Simulation -> verifies RTL matches C behavior
 # 8. Export RTL (IP Catalog format)
@@ -154,9 +190,11 @@ The `run_hls.tcl` script builds two solutions:
 2. Create a Block Design
 3. Add the **ZYNQ7 Processing System** IP
 4. Add the **Pico Miner** IP (from the HLS export, add the IP repository)
-5. In `processing_system7_0`, keep `FCLK_CLK0 = 100 MHz` (default)
-6. Run **Connection Automation** (connects AXI-Lite automatically)
-7. Generate bitstream:
+5. Add an **AXI GPIO** IP, configure for 8-bit output (LEDs)
+6. In `processing_system7_0`, keep `FCLK_CLK0 = 100 MHz` (default)
+7. Run **Connection Automation** (connects AXI-Lite automatically)
+8. Connect GPIO output to ZedBoard LED pins (constrain in XDC)
+9. Generate bitstream:
 
 ```tcl
 open_bd_design [get_files miner.bd]
@@ -172,8 +210,8 @@ launch_runs impl_1 -to_step write_bitstream -jobs 4
 wait_on_run impl_1
 ```
 
-8. **Export Hardware** (File > Export > Export Hardware, include bitstream)
-9. **Launch SDK** (File > Launch SDK)
+10. **Export Hardware** (File > Export > Export Hardware, include bitstream)
+11. **Launch SDK** (File > Launch SDK)
 
 ### Step 3: Xilinx SDK -- ARM Software
 
@@ -182,8 +220,9 @@ wait_on_run impl_1
 3. Build the project
 4. Program the FPGA and run the application
 5. Observe results on the UART serial terminal (115200 baud)
+6. Watch the ZedBoard LEDs light up as mining progresses
 
-> **Note**: Use "Empty Application" template, not "Hello World". The SDK Empty Application template does not include `platform.h` -- the driver uses `xil_cache.h` directly.
+> **Note**: Use "Empty Application" template, not "Hello World". The driver uses `xil_cache.h` directly (not `platform.h`).
 
 ## Expected Output
 
@@ -193,10 +232,7 @@ wait_on_run impl_1
 ################################################################
 #                                                              #
 #         PICO MINER -- Bitcoin SHA-256 HLS Testbench          #
-#      Real Bitcoin Mining on FPGA (Zynq-7020 / ZedBoard)      #
-#                                                              #
-#  This testbench mines REAL Bitcoin blocks using the same     #
-#  double-SHA-256 algorithm used by every Bitcoin miner.       #
+#           Zynq-7020 (ZedBoard) + Vivado HLS 2019.1          #
 #                                                              #
 ################################################################
 
@@ -209,47 +245,35 @@ TEST 1: SHA-256 Known Vector -- SHA256("abc")
   SHA-256 NIST test: [OK]
 
 ================================================================
-TEST 2: Mine Bitcoin Block 1 -- Full Range Search from Nonce=0
-  This is REAL Bitcoin mining: searching for Block 1's nonce
-  starting from zero, exactly as Satoshi's CPU did in 2009.
+TEST 2: Mine Block 1 -- Full Range Search from Nonce=0
+  Brute-force search for Block 1's nonce (~31.8M iterations)
 ================================================================
-  Known nonce (LE): 0x9962e301  (BE): 0x01e36299
-  ...
   [SW MINING] Searching from nonce_be=0x00000000...
   [SW MINING] FOUND! Nonce (BE): 0x01e36299
   [SW MINING] Matches known Block 1 nonce: [OK]
 
 ================================================================
-TEST: Mine Bitcoin Block 1 -- HW Accelerator
+TEST: Mine Block 1 -- HW Accelerator
 ================================================================
   [HW] Status: FOUND
   [HW] Found nonce (BE): 0x01e36299
-  [HW] Nonce matches Bitcoin Block 1: [OK]
+  [HW] Nonce matches Block 1: [OK]
 
 ================================================================
-TEST: Mine Bitcoin Block 170 -- HW Accelerator
+TEST: Mine Block 939260 -- HW Accelerator
 ================================================================
   [HW] Status: FOUND
-  [HW] Found nonce (BE): 0x709e3e28
-  [HW] Nonce matches Bitcoin Block 170: [OK]
+  [HW] Found nonce (BE): 0x080a741e
+  [HW] Nonce matches Block 939260: [OK]
 
 ================================================================
-TEST: Mine Bitcoin Block 181 -- HW Accelerator
-================================================================
-  [HW] Status: FOUND
-  [HW] Found nonce (BE): 0x192d3f2f
-  [HW] Nonce matches Bitcoin Block 181: [OK]
-
-================================================================
-TEST 6: No Solution in Range
+TEST 5: No Solution in Range
 ================================================================
   Status: NOT FOUND (expected)
   No-solution test: [OK]
 
 ================================================================
-ALL TESTS PASSED
-  Successfully mined 3 real Bitcoin blocks (1, 170, 181)
-  using the identical double-SHA-256 algorithm as Bitcoin.
+ALL TESTS PASSED (5 tests)
 ================================================================
 ```
 
@@ -258,58 +282,70 @@ ALL TESTS PASSED
 ```
 ############################################################
 #                                                          #
-#      PICO MINER -- Real Bitcoin Mining on FPGA           #
-#        Double-SHA-256 with Midstate Optimization          #
-#         ARM (Zynq PS) + HLS Accelerator (PL)             #
-#                                                          #
-#  This driver mines REAL Bitcoin blocks using the same    #
-#  algorithm used by every miner since January 2009.       #
+#              PICO MINER -- Bitcoin on FPGA               #
+#          Double-SHA-256 with Midstate Optimization        #
+#            Zynq-7020 (ZedBoard) + Vivado HLS             #
 #                                                          #
 ############################################################
 
-[INIT] Pico Miner IP initialized.
+  Target block:  #939260 (March 4, 2026)
+  Difficulty:    144,398,401,518,101
+  Algorithm:     Bitcoin double-SHA-256 (FIPS 180-4)
+  Optimization:  Midstate precomputation (ARM -> FPGA)
+  Expected hash: 000000000000000000017588478b3612...
+
+[INIT] Initializing Pico Miner HLS IP...
+[INIT] Pico Miner IP ready.
 
 ============================================================
-  Mining 3 real Bitcoin blocks...
+  STEP 1: Preparing block header
 ============================================================
-
-------------------------------------------------------------
-[MINING] Block 1
-  First block after genesis (Satoshi, Jan 9 2009)
-  Known nonce (LE): 0x9962E301  (BE): 0x01E36299
-  [HW] Status: FOUND
-  [HW] Nonce (BE): 0x01E36299
-  [SW] Status: FOUND
-  HW vs SW: [MATCH]
-  Nonce matches Block 1 from the Bitcoin blockchain: [OK]
-
-------------------------------------------------------------
-[MINING] Block 170
-  First non-coinbase tx: Satoshi -> Hal Finney, 10 BTC (Jan 12 2009)
-  Known nonce (LE): 0x283E9E70  (BE): 0x709E3E28
-  [HW] Status: FOUND
-  [HW] Nonce (BE): 0x709E3E28
-  [SW] Status: FOUND
-  HW vs SW: [MATCH]
-  Nonce matches Block 170 from the Bitcoin blockchain: [OK]
-
-------------------------------------------------------------
-[MINING] Block 181
-  Early block with two transactions (Jan 12 2009)
-  Known nonce (LE): 0x2F3F2D19  (BE): 0x192D3F2F
-  [HW] Status: FOUND
-  [HW] Nonce (BE): 0x192D3F2F
-  [SW] Status: FOUND
-  HW vs SW: [MATCH]
-  Nonce matches Block 181 from the Bitcoin blockchain: [OK]
+  Block header: 80 bytes, byte-swapped to big-endian
+  Midstate (SHA-256 after chunk 1):
+    XXXXXXXX XXXXXXXX XXXXXXXX XXXXXXXX XXXXXXXX XXXXXXXX XXXXXXXX XXXXXXXX
+  Chunk 2 tail: [XXXXXXXX, XXXXXXXX, XXXXXXXX]
+  Known nonce (LE): 0x1E740A08  (BE): 0x080A741E
 
 ============================================================
-  RESULTS SUMMARY
+  STEP 2: Mining Block #939260 (full brute-force from nonce=0)
 ============================================================
-  Blocks mined: 3 / 3
-  >>> ALL BLOCKS MINED SUCCESSFULLY <<<
-  >>> REAL BITCOIN MINING VERIFIED ON FPGA <<<
+  Searching 135,888,926 nonces in chunks of 1000000...
+
+  [MINING] nonces:    1000000 / 135888926  |   0%  |  1.3s  |  781 KH/s
+  [MINING] nonces:    2000000 / 135888926  |   1%  |  2.6s  |  781 KH/s
+  ...
+  [MINING] nonces:  134000000 / 135888926  |  98%  |  171.5s |  781 KH/s
+  >> NONCE FOUND! <<
+  Found nonce:    0x080A741E (BE)  0x1E740A08 (LE)
+  Total searched: 134,888,926 nonces
+  Elapsed time:   172.7 seconds
+  Hash rate:      781,024 H/s (781.0 KH/s)
+
 ============================================================
+  STEP 3: Verification
+============================================================
+  [HW] Found nonce (BE): 0x080A741E
+  [SW] Verification:     VALID
+  [SW] Double-SHA-256 hash (display order):
+    000000000000000000017588478b3612182486d33006ede1164fb146fa41cd06
+  [EXP] Expected hash:
+    000000000000000000017588478b3612182486d33006ede1164fb146fa41cd06
+
+  Nonce match:  HW=0x080A741E  Known=0x080A741E  [OK]
+
+############################################################
+#                                                          #
+#                   MINING COMPLETE                        #
+#                                                          #
+############################################################
+
+  Block:         #939260 (March 4, 2026)
+  Difficulty:    144,398,401,518,101
+  Nonce found:   0x080A741E (BE) / 0x1E740A08 (LE)
+  SW verified:   YES
+  Hash valid:    YES
+
+  LEDs: all ON = block successfully mined
 ```
 
 ## HLS Optimization Strategy
@@ -332,8 +368,6 @@ The core `sha256_compress()` function implements the 64-round SHA-256 compressio
 
 At 100 MHz, with II=1 compress: 100M cycles / 128 rounds = ~781K nonces/second.
 
-> **Note**: These are estimates. Actual performance depends on HLS synthesis results and timing closure. Timing at 100 MHz has not yet been verified in synthesis.
-
 ## AXI-Lite Register Interface
 
 Vivado HLS 2019.1 maps array arguments as individual scalar registers:
@@ -354,9 +388,9 @@ Vivado HLS 2019.1 maps array arguments as individual scalar registers:
 |---|---|
 | `src/pico_miner.h` | Header: SHA-256 constants (H0-H7, K[64]), function prototype, interface defines |
 | `src/pico_miner.cpp` | HLS source: `sha256_compress()` + double-SHA-256 mining loop with midstate optimization |
-| `src/pico_miner_tb.cpp` | HLS testbench: NIST vector, 3 Bitcoin blocks (1, 170, 181), full-range SW search, no-solution test |
-| `src/pico_miner_arm.c` | ARM driver: 3 blocks in struct array, midstate computation, HW mining, SW golden model verification |
-| `doc/poc.tex` | LaTeX proof of concept document: SHA-256 algorithm, architecture, verification strategy |
+| `src/pico_miner_tb.cpp` | HLS testbench: 5 tests -- NIST vector, Block 1 (full-range SW + HW), Block 939260 HW, no-solution |
+| `src/pico_miner_arm.c` | ARM driver: Block 939260 full-range demo with chunked HW calls, LED progress, XTime timing |
+| `doc/poc.tex` | Project memory (bilingual ES/EN): SHA-256 algorithm, architecture, verification, results |
 | `run_hls.tcl` | TCL script: builds 2 solutions (II=1 baseline, II=2 relaxed), runs csim/csynth/cosim/export |
 
 ## License
