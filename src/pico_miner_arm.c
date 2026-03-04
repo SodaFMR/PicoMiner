@@ -159,7 +159,9 @@ static void pico_miner_sw(const unsigned int midstate[8],
         unsigned int final_hash[8];
         sha256_compress_sw(SHA256_H_INIT, hash2_W, final_hash);
 
-        if (final_hash[0] <= target_hi) {
+        /* Bitcoin display hash is byte-reversed; leading zeros correspond
+         * to final_hash[7], not final_hash[0]. */
+        if (final_hash[7] <= target_hi) {
             *found_nonce = nonce;
             *status = MINING_FOUND;
             return;

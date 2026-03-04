@@ -70,10 +70,11 @@ void pico_miner(
     /* Nonce search range [nonce_start, nonce_end) */
     unsigned int nonce_start,
     unsigned int nonce_end,
-    /* Difficulty target: most-significant word of the 256-bit target.
-     * A valid hash has its first word (big-endian) < target_hi.
-     * For early Bitcoin blocks this is sufficient (target_hi = 0x00000000
-     * requires the top 32 bits of the hash to be zero). */
+    /* Difficulty target: compared against final_hash[7], the last word of
+     * the SHA-256 output, which corresponds to the most-significant 32 bits
+     * of the Bitcoin display hash (reversed byte order).
+     * For early Bitcoin blocks, target_hi = 0x00000000 requires the
+     * display hash to start with 32 zero bits. */
     unsigned int target_hi,
     /* Outputs */
     unsigned int *found_nonce,

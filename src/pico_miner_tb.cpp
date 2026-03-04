@@ -170,11 +170,14 @@ static int verify_block_hash_sw(const unsigned int header_le[20],
     for (i = 7; i >= 0; i--) printf("%08x", bswap32(final_hash[i]));
     printf("\n");
 
-    if (final_hash[0] != 0x00000000u) {
-        printf("  ERROR: first word should be 00000000!\n");
+    /* Bitcoin displays hashes in reversed byte order.  The leading zeros
+     * in the display hash correspond to the LAST word of the SHA-256
+     * output (final_hash[7]), byte-swapped. */
+    if (final_hash[7] != 0x00000000u) {
+        printf("  ERROR: last SHA-256 word should be 00000000!\n");
         return 1;
     }
-    printf("  Starts with 32 zero bits: [OK]\n");
+    printf("  Leading 32 zero bits in display hash: [OK]\n");
     return 0;
 }
 
@@ -317,7 +320,7 @@ static int test_mine_block1_full_range(void)
         unsigned int final_hash[8];
         sha256_compress_sw(H_init, hash2_W, final_hash);
 
-        if (final_hash[0] == 0x00000000u) {
+        if (final_hash[7] == 0x00000000u) {
             found_nonce_sw = nonce;
             found = 1;
             break;

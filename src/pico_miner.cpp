@@ -203,21 +203,16 @@ void pico_miner(
 #pragma HLS ARRAY_PARTITION variable=final_hash complete dim=1
         sha256_compress(H_init, hash2_W, final_hash);
 
-        /* ---- Check difficulty: final_hash[0] (MSB) < target_hi --------- *
-         * Bitcoin hashes are big-endian 256-bit numbers.  For early blocks
-         * the target has leading zero bytes, so checking the first word
-         * (most significant 32 bits) against target_hi is sufficient.
-         * For block 170: target_hi = 0x00000000, so final_hash[0] must
-         * equal 0 and we'd also need to check final_hash[1] < 0xFFFF...
-         * But since target_hi=0 means ANY non-zero first word fails,
-         * and a match on word 0 with target_hi=0 means the hash starts
-         * with 32 zero bits which is already below the actual target
-         * for all early Bitcoin blocks (difficulty 1).
+        /* ---- Check difficulty ------------------------------------------- *
+         * Bitcoin displays hashes in reversed byte order.  The leading
+         * zeros in the display hash correspond to the LAST word of the
+         * SHA-256 output (final_hash[7]).
+         *
+         * For early blocks (difficulty 1), the target requires the hash
+         * to start with 32 zero bits in display order, i.e.,
+         * final_hash[7] <= target_hi where target_hi = 0x00000000.
          */
-        if (final_hash[0] <= target_hi) {
-            /* Additional check: if first word equals target, this is
-             * conservative -- we accept it.  For educational purposes
-             * and early blocks this is correct. */
+        if (final_hash[7] <= target_hi) {
             result_nonce  = nonce;
             mining_status = MINING_FOUND;
             found = 1;
