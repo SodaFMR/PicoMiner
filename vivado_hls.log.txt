@@ -1,0 +1,124 @@
+
+****** Vivado(TM) HLS - High-Level Synthesis from C, C++ and SystemC v2019.1 (64-bit)
+  **** SW Build 2552052 on Fri May 24 14:49:42 MDT 2019
+  **** IP Build 2548770 on Fri May 24 18:01:18 MDT 2019
+    ** Copyright 1986-2019 Xilinx, Inc. All Rights Reserved.
+
+source C:/Xilinx/Vivado/2019.1/scripts/vivado_hls/hls.tcl -notrace
+INFO: Applying HLS Y2K22 patch v1.2 for IP revision
+INFO: [HLS 200-10] Running 'C:/Xilinx/Vivado/2019.1/bin/unwrapped/win64.o/vivado_hls.exe'
+INFO: [HLS 200-10] For user 'DETCP' on host 'pc-l4-39c33d' (Windows NT_amd64 version 6.2) on Wed Mar 04 17:38:05 +0100 2026
+INFO: [HLS 200-10] In directory 'C:/Users/DETCP/Desktop/PicoMine'
+Sourcing Tcl script 'run_hls.tcl'
+INFO: [HLS 200-10] Creating and opening project 'C:/Users/DETCP/Desktop/PicoMine/pico_miner_hls'.
+INFO: [HLS 200-10] Adding design file 'src/pico_miner.cpp' to the project
+INFO: [HLS 200-10] Adding design file 'src/pico_miner.h' to the project
+INFO: [HLS 200-10] Adding test bench file 'src/pico_miner_tb.cpp' to the project
+INFO: [HLS 200-10] Creating and opening solution 'C:/Users/DETCP/Desktop/PicoMine/pico_miner_hls/1_sha256_baseline'.
+INFO: [HLS 200-10] Setting target device to 'xc7z020-clg484-1'
+INFO: [SYN 201-201] Setting up clock 'default' with a period of 10ns.
+INFO: [SIM 211-2] *************** CSIM start ***************
+INFO: [SIM 211-4] CSIM will launch GCC as the compiler.
+   Compiling ../../../../src/pico_miner_tb.cpp in debug mode
+   Compiling ../../../../src/pico_miner.cpp in debug mode
+   Generating csim.exe
+
+################################################################
+#                                                              #
+#         PICO MINER -- Bitcoin SHA-256 HLS Testbench          #
+#      Real Bitcoin Mining on FPGA (Zynq-7020 / ZedBoard)      #
+#                                                              #
+#  This testbench mines REAL Bitcoin blocks using the same     #
+#  double-SHA-256 algorithm used by every Bitcoin miner.       #
+#                                                              #
+################################################################
+
+================================================================
+TEST 1: SHA-256 Known Vector -- SHA256("abc")
+  Reference: NIST FIPS 180-4
+================================================================
+  Computed: ba7816bf 8f01cfea 414140de 5dae2223 b00361a3 96177a9c b410ff61 f20015ad 
+  Expected: ba7816bf 8f01cfea 414140de 5dae2223 b00361a3 96177a9c b410ff61 f20015ad 
+  SHA-256 NIST test: [OK]
+
+================================================================
+TEST 2: Mine Bitcoin Block 1 -- Full Range Search from Nonce=0
+  This is REAL Bitcoin mining: searching for Block 1's nonce
+  starting from zero, exactly as Satoshi's CPU did in 2009.
+================================================================
+  Known nonce (LE): 0x9962e301  (BE): 0x01e36299
+  Midstate: a9f61323 7fbb2a30 066ca2d4 7d617869 ccbd0ee0 28757b75 5ff2646f 0e7501ac 
+  Block 1 hash (display): 00000000839a8e6886ab5951d76f411475428afc90947ee320161bbf18eb6048
+  ERROR: first word should be 00000000!
+
+  [SW MINING] Searching from nonce_be=0x00000000...
+  [SW MINING] Target: find nonce_be=0x01e36299
+  [SW MINING] This searches ~31679130 nonces...
+  [SW MINING] ERROR: nonce not found!
+
+================================================================
+TEST: Mine Bitcoin Block 1 -- HW Accelerator
+  First block after genesis (Satoshi, Jan 9 2009)
+================================================================
+  Known nonce (LE): 0x9962e301  (BE): 0x01e36299
+  Midstate: a9f61323 7fbb2a30 066ca2d4 7d617869 ccbd0ee0 28757b75 5ff2646f 0e7501ac 
+  Chunk2 tail: [57233e0e, 61bc6649, ffff001d]
+  Bitcoin Block 1 hash (display): 00000000839a8e6886ab5951d76f411475428afc90947ee320161bbf18eb6048
+  ERROR: first word should be 00000000!
+  Expected:  00000000839a8e6886ab5951d76f411475428afc90947ee320161bbf18eb6048
+
+  [HW] Searching nonces [0x01e36289, 0x01e362a9)...
+  [HW] Status: NOT FOUND
+  ERROR: HW did not find a valid nonce!
+
+================================================================
+TEST: Mine Bitcoin Block 170 -- HW Accelerator
+  First non-coinbase tx (Satoshi -> Hal Finney, 10 BTC, Jan 12 2009)
+================================================================
+  Known nonce (LE): 0x709e3e28  (BE): 0x283e9e70
+  Midstate: a3006290 b58ab7b0 2c3c5871 1173243c d57884d9 7afc2358 55c86a4c 8c050b4c 
+  Chunk2 tail: [562cac7d, 51b96a49, ffff001d]
+  Bitcoin Block 170 hash (display): 00000000d1145790a8694403d4063f323d499e655c83426834d4ce2f8dd4a2ee
+  ERROR: first word should be 00000000!
+  Expected:  00000000d1145790a8694403d4063f323d499e655c83426834d4ce2f8dd4a2ee
+
+  [HW] Searching nonces [0x283e9e60, 0x283e9e80)...
+  [HW] Status: NOT FOUND
+  ERROR: HW did not find a valid nonce!
+
+================================================================
+TEST: Mine Bitcoin Block 181 -- HW Accelerator
+  Early block with two transactions (Jan 12 2009)
+================================================================
+  Known nonce (LE): 0x2f3f2d19  (BE): 0x192d3f2f
+  Midstate: c43bf8ed dbd499c3 6317bb03 c5b7ee5f 1de7a68e 9bd40819 fae2c724 133e7ac8 
+  Chunk2 tail: [dbb192ed, e5dc6a49, ffff001d]
+  Bitcoin Block 181 hash (display): 00000000dc55860c8a29c58d45209318fa9e9dc2c1833a7226d86bc465afc6e5
+  ERROR: first word should be 00000000!
+  Expected:  00000000dc55860c8a29c58d45209318fa9e9dc2c1833a7226d86bc465afc6e5
+
+  [HW] Searching nonces [0x192d3f1f, 0x192d3f3f)...
+  [HW] Status: NOT FOUND
+  ERROR: HW did not find a valid nonce!
+
+================================================================
+TEST 6: No Solution in Range
+================================================================
+  Status: NOT FOUND (expected)
+  No-solution test: [OK]
+
+================================================================
+FAILED: 8 error(s) detected.
+================================================================
+
+@E Simulation failed: Function 'main' returns nonzero value '8'.
+ERROR: [SIM 211-100] 'csim_design' failed: nonzero return value.
+INFO: [SIM 211-3] *************** CSIM finish ***************
+4
+    while executing
+"source run_hls.tcl"
+    ("uplevel" body line 1)
+    invoked from within
+"uplevel \#0 [list source $arg] "
+
+INFO: [Common 17-206] Exiting vivado_hls at Wed Mar  4 17:39:05 2026...
