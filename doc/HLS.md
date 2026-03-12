@@ -1,35 +1,35 @@
-# HLS -- Diseno Hardware a Nivel de Sintesis de Alto Nivel
+# HLS -- Diseño Hardware a Nivel de Síntesis de Alto Nivel
 
-Documento tecnico que detalla todo el trabajo realizado a nivel de hardware
-mediante Vivado HLS 2019.1 para el acelerador de mineria Bitcoin PicoMiner.
+Documento técnico que detalla todo el trabajo realizado a nivel de hardware
+mediante Vivado HLS 2019.1 para el acelerador de minería Bitcoin PicoMiner.
 
 ---
 
-## Indice
+## Índice
 
-1. [Funcion de compresion SHA-256](#1-funcion-de-compresion-sha-256)
-2. [Pragmas HLS y decisiones de diseno](#2-pragmas-hls-y-decisiones-de-diseno)
-3. [Funcion top-level: pico_miner](#3-funcion-top-level-pico_miner)
+1. [Función de compresión SHA-256](#1-función-de-compresión-sha-256)
+2. [Pragmas HLS y decisiones de diseño](#2-pragmas-hls-y-decisiones-de-diseño)
+3. [Función top-level: pico_miner](#3-función-top-level-pico_miner)
 4. [Interfaz AXI-Lite](#4-interfaz-axi-lite)
-5. [Bucle de mineria](#5-bucle-de-mineria)
-6. [Soluciones de sintesis](#6-soluciones-de-sintesis)
-7. [Script TCL de automatizacion](#7-script-tcl-de-automatizacion)
+5. [Bucle de minería](#5-bucle-de-minería)
+6. [Soluciones de síntesis](#6-soluciones-de-síntesis)
+7. [Script TCL de automatización](#7-script-tcl-de-automatización)
 8. [Estimaciones de rendimiento](#8-estimaciones-de-rendimiento)
 9. [Inventario completo de pragmas](#9-inventario-completo-de-pragmas)
 
 ---
 
-## 1. Funcion de compresion SHA-256
+## 1. Función de compresión SHA-256
 
-**Archivo:** `src/pico_miner.cpp`, lineas 34-89
+**Archivo:** `src/pico_miner.cpp`, líneas 34-89
 
-La funcion `sha256_compress` es el nucleo computacional del diseno. Implementa
-una compresion SHA-256 completa sobre un bloque de 64 bytes (512 bits), siguiendo
-el estandar FIPS 180-4.
+La función `sha256_compress` es el núcleo computacional del diseño. Implementa
+una compresión SHA-256 completa sobre un bloque de 64 bytes (512 bits), siguiendo
+el estándar FIPS 180-4.
 
 ### 1.1 Macros auxiliares
 
-Definidas en `src/pico_miner.cpp`, lineas 22-32:
+Definidas en `src/pico_miner.cpp`, líneas 22-32:
 
 ```c
 #define ROTR(x, n)  (((x) >> (n)) | ((x) << (32 - (n))))
@@ -44,13 +44,13 @@ Definidas en `src/pico_miner.cpp`, lineas 22-32:
 #define sigma1(x)  (ROTR(x, 17) ^ ROTR(x, 19) ^ SHR(x, 10))
 ```
 
-**Implicacion hardware:** Cada rotacion (`ROTR`) se implementa como un
-recableado de bits (coste cero en logica). Las operaciones XOR, AND y NOT son
-puertas basicas. Todo el conjunto es puramente combinacional.
+**Implicación hardware:** Cada rotación (`ROTR`) se implementa como un
+recableado de bits (coste cero en lógica). Las operaciones XOR, AND y NOT son
+puertas básicas. Todo el conjunto es puramente combinacional.
 
-### 1.2 Expansion del message schedule (W)
+### 1.2 Expansión del message schedule (W)
 
-**Archivo:** `src/pico_miner.cpp`, lineas 46-58
+**Archivo:** `src/pico_miner.cpp`, líneas 46-58
 
 ```c
 unsigned int W[64];
@@ -69,23 +69,23 @@ for (i = 16; i < 64; i++) {
 }
 ```
 
-**Decisiones de diseno:**
+**Decisiones de diseño:**
 
 - `ARRAY_PARTITION complete`: El array `W[64]` se descompone en **64 registros
-  individuales**. Sin esta directiva, HLS colocaria el array en BRAM con puertos
-  limitados, creando un cuello de botella ya que la expansion necesita acceso
-  simultaneo a `W[i-2]`, `W[i-7]`, `W[i-15]` y `W[i-16]`.
+  individuales**. Sin esta directiva, HLS colocaría el array en BRAM con puertos
+  limitados, creando un cuello de botella ya que la expansión necesita acceso
+  simultáneo a `W[i-2]`, `W[i-7]`, `W[i-15]` y `W[i-16]`.
 
-- `UNROLL` en `load_W`: Las 16 palabras de entrada se cargan en un unico ciclo
+- `UNROLL` en `load_W`: Las 16 palabras de entrada se cargan en un único ciclo
   de reloj (16 escrituras paralelas a registros).
 
 - `UNROLL` en `expand_W`: Las 48 palabras restantes (W[16]..W[63]) se calculan
-  de forma **completamente combinacional** en un unico ciclo. Esto genera una
+  de forma **completamente combinacional** en un único ciclo. Esto genera una
   red combinacional profunda pero el resultado se almacena en registros.
 
-### 1.3 Rondas de compresion
+### 1.3 Rondas de compresión
 
-**Archivo:** `src/pico_miner.cpp`, lineas 64-78
+**Archivo:** `src/pico_miner.cpp`, líneas 64-78
 
 ```c
 compress:
@@ -98,60 +98,60 @@ for (i = 0; i < 64; i++) {
 }
 ```
 
-**`PIPELINE II=1`** es la directiva mas critica del diseno. Indica a HLS que
-inicie una nueva ronda de compresion en **cada ciclo de reloj** (Initiation
+**`PIPELINE II=1`** es la directiva más crítica del diseño. Indica a HLS que
+inicie una nueva ronda de compresión en **cada ciclo de reloj** (Initiation
 Interval = 1).
 
 Cada ronda realiza en un solo ciclo:
 - 5 sumas de 32 bits (`h + SIGMA1(e) + CH(e,f,g) + K[i] + W[i]` y `d + temp1`)
-- Rotaciones multiples (SIGMA0, SIGMA1 -- sin coste en logica)
+- Rotaciones múltiples (SIGMA0, SIGMA1 -- sin coste en lógica)
 - Operaciones logicas (CH, MAJ)
 - Desplazamiento de las 8 variables de trabajo
 
-Esta es la **ruta critica de timing** del diseno. A 100 MHz (10 ns), encajar
-5 sumas + rotaciones + logica en un solo ciclo es agresivo. Por eso existe la
-Solucion 2 como alternativa con II=2.
+Esta es la **ruta crítica de timing** del diseño. A 100 MHz (10 ns), encajar
+5 sumas + rotaciones + lógica en un solo ciclo es agresivo. Por eso existe la
+Solución 2 como alternativa con II=2.
 
 ### 1.4 INLINE off
 
-**Archivo:** `src/pico_miner.cpp`, linea 40
+**Archivo:** `src/pico_miner.cpp`, línea 40
 
 ```c
 #pragma HLS INLINE off
 ```
 
-`sha256_compress` se llama **dos veces** por nonce en el bucle de mineria
+`sha256_compress` se llama **dos veces** por nonce en el bucle de minería
 (primera SHA-256 con midstate, segunda SHA-256 con valores iniciales). La
-directiva `INLINE off` impide que HLS inserte el cuerpo de la funcion en cada
-punto de llamada, lo que **duplicaria el area de logica**. Al mantenerla como
-un modulo RTL separado, el hardware se comparte y las dos llamadas se ejecutan
+directiva `INLINE off` impide que HLS inserte el cuerpo de la función en cada
+punto de llamada, lo que **duplicaría el área de lógica**. Al mantenerla como
+un módulo RTL separado, el hardware se comparte y las dos llamadas se ejecutan
 secuencialmente.
 
 ---
 
-## 2. Pragmas HLS y decisiones de diseno
+## 2. Pragmas HLS y decisiones de diseño
 
-### 2.1 Filosofia general
+### 2.1 Filosofía general
 
-El diseno sigue una estrategia de **maximizar el throughput por nonce**:
+El diseño sigue una estrategia de **maximizar el throughput por nonce**:
 
-1. **Todo en registros**: Ningun array interno usa BRAM. Todos los arrays
-   (`W[64]`, `ms[8]`, `tail[3]`, `chunk2_W[16]`, etc.) estan completamente
+1. **Todo en registros**: Ningún array interno usa BRAM. Todos los arrays
+   (`W[64]`, `ms[8]`, `tail[3]`, `chunk2_W[16]`, etc.) están completamente
    particionados en registros individuales mediante `ARRAY_PARTITION complete`.
 
 2. **Bucles de copia totalmente desenrollados**: Todos los bucles de copia
    (`load_W`, `cache_ms`, `cache_tail`, `build_hash2_msg`) usan `UNROLL`
-   para ejecutarse en un unico ciclo.
+   para ejecutarse en un único ciclo.
 
-3. **Pipeline agresivo**: El bucle de compresion usa `PIPELINE II=1` para
+3. **Pipeline agresivo**: El bucle de compresión usa `PIPELINE II=1` para
    procesar una ronda por ciclo de reloj.
 
-4. **Comparticion de hardware**: `sha256_compress` se mantiene como modulo
-   separado (`INLINE off`) para compartir la logica entre las dos llamadas.
+4. **Compartición de hardware**: `sha256_compress` se mantiene como módulo
+   separado (`INLINE off`) para compartir la lógica entre las dos llamadas.
 
 ### 2.2 Cache de entradas
 
-**Archivo:** `src/pico_miner.cpp`, lineas 120-136
+**Archivo:** `src/pico_miner.cpp`, líneas 120-136
 
 ```c
 unsigned int ms[8];
@@ -172,23 +172,23 @@ for (i = 0; i < 3; i++) {
 ```
 
 Los valores `midstate` y `chunk2_tail` se copian desde los registros AXI-Lite a
-registros locales **una unica vez** al inicio de la funcion. Esto evita que el
-bucle de mineria acceda al bus AXI en cada iteracion.
+registros locales **una única vez** al inicio de la función. Esto evita que el
+bucle de minería acceda al bus AXI en cada iteración.
 
 ---
 
-## 3. Funcion top-level: pico_miner
+## 3. Función top-level: pico_miner
 
-**Archivo:** `src/pico_miner.cpp`, lineas 92-225
+**Archivo:** `src/pico_miner.cpp`, líneas 92-225
 
-La funcion `pico_miner` es la **funcion top** que Vivado HLS sintetiza a RTL.
+La función `pico_miner` es la **función top** que Vivado HLS sintetiza a RTL.
 Su signatura define la interfaz hardware completa:
 
 ```c
 void pico_miner(
     unsigned int midstate[8],       // Estado SHA-256 tras chunk 1 (del ARM)
     unsigned int chunk2_tail[3],    // merkle_tail, timestamp, bits
-    unsigned int nonce_start,       // Inicio del rango de busqueda
+    unsigned int nonce_start,       // Inicio del rango de búsqueda
     unsigned int nonce_end,         // Fin del rango (exclusivo)
     unsigned int target_hi,         // Objetivo de dificultad
     unsigned int *found_nonce,      // Salida: nonce encontrado
@@ -196,14 +196,14 @@ void pico_miner(
 );
 ```
 
-Cada parametro se convierte en uno o mas registros AXI-Lite accesibles desde el
+Cada parámetro se convierte en uno o más registros AXI-Lite accesibles desde el
 procesador ARM.
 
 ---
 
 ## 4. Interfaz AXI-Lite
 
-**Archivo:** `src/pico_miner.cpp`, lineas 101-109
+**Archivo:** `src/pico_miner.cpp`, líneas 101-109
 
 ```c
 #pragma HLS INTERFACE s_axilite port=midstate     bundle=myaxi
@@ -216,16 +216,16 @@ procesador ARM.
 #pragma HLS INTERFACE s_axilite port=return       bundle=myaxi
 ```
 
-**Todos los puertos** se mapean a un unico bus AXI-Lite esclavo (bundle `myaxi`).
-Esto genera una interfaz con una unica direccion base y registros en offsets fijos.
+**Todos los puertos** se mapean a un único bus AXI-Lite esclavo (bundle `myaxi`).
+Esto genera una interfaz con una única dirección base y registros en offsets fijos.
 
 ### 4.1 Mapeado de registros
 
 Vivado HLS 2019.1 mapea arrays como **registros escalares individuales**. El
 array `midstate[8]` genera 8 registros (`midstate_0` a `midstate_7`), cada uno
-con su propia funcion `Set`/`Get` en el driver auto-generado.
+con su propia función `Set`/`Get` en el driver auto-generado.
 
-| Parametro | Tipo | Registros | Funcion SDK |
+| Parámetro | Tipo | Registros | Función SDK |
 |-----------|------|-----------|-------------|
 | `midstate[0..7]` | Entrada | 8 x 32 bits | `XPico_miner_Set_midstate_0..7` |
 | `chunk2_tail[0..2]` | Entrada | 3 x 32 bits | `XPico_miner_Set_chunk2_tail_0..2` |
@@ -238,21 +238,21 @@ con su propia funcion `Set`/`Get` en el driver auto-generado.
 
 ### 4.2 Protocolo de control
 
-El pragma `port=return` mapea las senales de control del bloque HLS:
+El pragma `port=return` mapea las señales de control del bloque HLS:
 
 - **`ap_start`** (bit 0 del registro de control): El ARM lo pone a 1 para
-  iniciar la ejecucion.
+  iniciar la ejecución.
 - **`ap_done`** (bit 1): La IP lo pone a 1 cuando termina.
-- **`ap_idle`** (bit 2): Indica que la IP esta ociosa.
-- **`ap_ready`** (bit 3): Indica que esta lista para una nueva invocacion.
+- **`ap_idle`** (bit 2): Indica que la IP está ociosa.
+- **`ap_ready`** (bit 3): Indica que está lista para una nueva invocación.
 
 El flujo desde el ARM es: Escribir entradas -> Start -> Poll Done -> Leer salidas.
 
 ---
 
-## 5. Bucle de mineria
+## 5. Bucle de minería
 
-**Archivo:** `src/pico_miner.cpp`, lineas 147-220
+**Archivo:** `src/pico_miner.cpp`, líneas 147-220
 
 ### 5.1 Estructura del bucle
 
@@ -265,77 +265,77 @@ for (nonce = nonce_start; nonce < nonce_end; nonce++) {
 }
 ```
 
-- **`LOOP_TRIPCOUNT`**: Es una directiva informativa (no afecta a la sintesis).
+- **`LOOP_TRIPCOUNT`**: Es una directiva informativa (no afecta a la síntesis).
   Indica a HLS que el bucle ejecutara entre 1 y 16M iteraciones para generar
   estimaciones de rendimiento en los informes.
 
-- **`if (found) continue`**: Una vez encontrado un nonce valido, las iteraciones
-  restantes se saltan. Esto es mas sencillo que un `break`, que puede complicar
-  la sintesis HLS.
+- **`if (found) continue`**: Una vez encontrado un nonce válido, las iteraciones
+  restantes se saltan. Esto es más sencillo que un `break`, que puede complicar
+  la síntesis HLS.
 
 ### 5.2 Trabajo por nonce
 
-Cada iteracion del bucle realiza:
+Cada iteración del bucle realiza:
 
-1. **Construir bloque chunk 2** (lineas 162-174): Se monta el bloque de 16
-   palabras para la primera compresion:
+1. **Construir bloque chunk 2** (líneas 162-174): Se monta el bloque de 16
+   palabras para la primera compresión:
    - `W[0..2]` = merkle_tail, timestamp, bits (constantes del `tail`)
    - `W[3]` = **nonce** (la variable que se itera)
    - `W[4]` = `0x80000000` (padding SHA-256)
    - `W[5..14]` = 0
    - `W[15]` = `0x00000280` (longitud del mensaje = 640 bits)
 
-2. **Primera SHA-256** (linea 179): `sha256_compress(ms, chunk2_W, first_hash)`
+2. **Primera SHA-256** (línea 179): `sha256_compress(ms, chunk2_W, first_hash)`
    Comprime el chunk 2 usando el midstate como estado inicial.
 
-3. **Construir bloque para segunda SHA-256** (lineas 188-199): El hash de 32
+3. **Construir bloque para segunda SHA-256** (líneas 188-199): El hash de 32
    bytes (8 palabras) se rellena hasta 64 bytes:
    - `W[0..7]` = first_hash
    - `W[8]` = `0x80000000`
    - `W[9..14]` = 0
    - `W[15]` = `0x00000100` (longitud = 256 bits)
 
-4. **Segunda SHA-256** (linea 204): `sha256_compress(H_init, hash2_W, final_hash)`
-   Hash del hash usando los valores iniciales estandar SHA-256.
+4. **Segunda SHA-256** (línea 204): `sha256_compress(H_init, hash2_W, final_hash)`
+   Hash del hash usando los valores iniciales estándar SHA-256.
 
-5. **Comprobacion de dificultad** (linea 215):
+5. **Comprobación de dificultad** (línea 215):
    ```c
    if (final_hash[7] <= target_hi) { ... }
    ```
-   Bitcoin muestra los hashes en orden de bytes invertido. Los ceros iniciales
-   del hash en formato de visualizacion corresponden a `final_hash[7]` (la
-   **ultima** palabra de la salida SHA-256), no a `final_hash[0]`.
+    Bitcoin muestra los hashes en orden de bytes invertido. Los ceros iniciales
+    del hash en formato de visualización corresponden a `final_hash[7]` (la
+    **última** palabra de la salida SHA-256), no a `final_hash[0]`.
 
 ### 5.3 Ciclos por nonce
 
-Cada compresion SHA-256 tarda ~64 ciclos (64 rondas con II=1). Con dos
+Cada compresión SHA-256 tarda ~64 ciclos (64 rondas con II=1). Con dos
 compresiones por nonce, el total es **~128 ciclos por nonce**.
 
 ---
 
-## 6. Soluciones de sintesis
+## 6. Soluciones de síntesis
 
 El proyecto define dos soluciones en el script TCL (`run_hls.tcl`):
 
-### 6.1 Solucion 1: Baseline (II=1)
+### 6.1 Solución 1: Baseline (II=1)
 
-**Archivo:** `run_hls.tcl`, lineas 58-77
+**Archivo:** `run_hls.tcl`, líneas 58-77
 
-- Usa las directivas tal como estan en el codigo fuente
+- Usa las directivas tal como están en el código fuente
 - El bucle `compress` ejecuta una ronda por ciclo (II=1)
 - ~128 ciclos por nonce
 - Throughput estimado: **~781 KH/s** a 100 MHz
-- Ruta critica: 5 sumas + rotaciones + logica en un ciclo de 10 ns
+- Ruta crítica: 5 sumas + rotaciones + lógica en un ciclo de 10 ns
 
 ```
 100,000,000 ciclos/s / 128 ciclos/nonce = 781,250 nonces/s
 ```
 
-### 6.2 Solucion 2: Relaxed (II=2)
+### 6.2 Solución 2: Relaxed (II=2)
 
-**Archivo:** `run_hls.tcl`, lineas 88-103
+**Archivo:** `run_hls.tcl`, líneas 88-103
 
-- Sobreescribe la directiva del codigo fuente mediante TCL:
+- Sobreescribe la directiva del código fuente mediante TCL:
   ```tcl
   set_directive_pipeline -II 2 "sha256_compress/compress"
   ```
@@ -343,26 +343,26 @@ El proyecto define dos soluciones en el script TCL (`run_hls.tcl`):
 - ~256 ciclos por nonce
 - Throughput estimado: **~390 KH/s** a 100 MHz
 
-Esta solucion existe como **respaldo** en caso de que la Solucion 1 no cumpla
-las restricciones de timing a 100 MHz. La ruta critica se relaja al distribuir
+Esta solución existe como **respaldo** en caso de que la Solución 1 no cumpla
+las restricciones de timing a 100 MHz. La ruta crítica se relaja al distribuir
 el trabajo de cada ronda en 2 ciclos.
 
-| Parametro | Solucion 1 (baseline) | Solucion 2 (relaxed) |
+| Parámetro | Solución 1 (baseline) | Solución 2 (relaxed) |
 |-----------|-----------------------|----------------------|
 | II del bucle compress | 1 | 2 |
 | Ciclos por nonce | ~128 | ~256 |
 | Throughput a 100 MHz | ~781 KH/s | ~390 KH/s |
-| Ruta critica | Agresiva | Relajada |
+| Ruta crítica | Agresiva | Relajada |
 
 ---
 
-## 7. Script TCL de automatizacion
+## 7. Script TCL de automatización
 
-**Archivo:** `run_hls.tcl` (138 lineas)
+**Archivo:** `run_hls.tcl` (138 líneas)
 
 El script automatiza todo el flujo HLS:
 
-### 7.1 Configuracion del proyecto
+### 7.1 Configuración del proyecto
 
 ```tcl
 set PROJECT_NAME  "pico_miner_hls"
@@ -373,27 +373,27 @@ set CLOCK_PERIOD  10
 
 - **FPGA**: Zynq-7020 en encapsulado CLG484 (ZedBoard)
 - **Reloj**: 10 ns = 100 MHz
-- **Funcion top**: `pico_miner`
+- **Función top**: `pico_miner`
 
-### 7.2 Flujo por solucion
+### 7.2 Flujo por solución
 
-**Solucion 1** (lineas 58-77):
-1. `csim_design` -- Simulacion C: compila y ejecuta el testbench en CPU. Los 5
-   tests se ejecutan. Valida la correccion funcional.
-2. `csynth_design` -- Sintesis C-a-RTL: analiza los pragmas y genera Verilog/VHDL.
+**Solución 1** (líneas 58-77):
+1. `csim_design` -- Simulación C: compila y ejecuta el testbench en CPU. Los 5
+   tests se ejecutan. Valida la corrección funcional.
+2. `csynth_design` -- Síntesis C-a-RTL: analiza los pragmas y genera Verilog/VHDL.
    Produce informes de rendimiento y uso de recursos.
-3. `cosim_design` -- Co-simulacion C/RTL: el RTL generado se simula con las
+3. `cosim_design` -- Co-simulación C/RTL: el RTL generado se simula con las
    entradas del testbench. Verifica que el RTL produce los mismos resultados que
-   la simulacion C.
-4. `export_design` -- Exporta la IP en formato IP Catalog para integracion en
+   la simulación C.
+4. `export_design` -- Exporta la IP en formato IP Catalog para integración en
    Vivado.
 
-**Solucion 2** (lineas 88-103):
-1. `csynth_design` -- Sintesis con II=2 (sin repetir csim, seria identico).
+**Solución 2** (líneas 88-103):
+1. `csynth_design` -- Síntesis con II=2 (sin repetir csim, sería idéntico).
 2. `cosim_design` -- Verifica el RTL con II=2.
 3. `export_design` -- Exporta como IP alternativa.
 
-### 7.3 Exportacion de IP
+### 7.3 Exportación de IP
 
 Las IPs se exportan con metadatos descriptivos:
 
@@ -405,26 +405,26 @@ export_design -format ip_catalog \
 ```
 
 La IP exportada incluye:
-- Modulos RTL (Verilog)
+- Módulos RTL (Verilog)
 - Ficheros de driver C auto-generados (`xpico_miner.h`, `xpico_miner.c`,
   `xpico_miner_hw.h`)
-- Definicion del interfaz AXI-Lite con offsets de registros
+- Definición del interfaz AXI-Lite con offsets de registros
 
 ---
 
 ## 8. Estimaciones de rendimiento
 
-### 8.1 Calculo de throughput
+### 8.1 Cálculo de throughput
 
 ```
 Frecuencia de reloj:       100 MHz = 100,000,000 ciclos/s
-Ciclos por compresion:     64 (con II=1)
+Ciclos por compresión:     64 (con II=1)
 Compresiones por nonce:    2 (chunk 2 + segundo hash)
 Ciclos por nonce:          128
 Throughput:                100,000,000 / 128 = 781,250 nonces/s ~ 781 KH/s
 ```
 
-### 8.2 Tiempo de mineria del Bloque 939260
+### 8.2 Tiempo de minería del Bloque 939260
 
 ```
 Nonce conocido (BE):       0x080A741E = 134,869,022 en decimal
@@ -432,30 +432,30 @@ Throughput:                781,250 nonces/s
 Tiempo estimado:           134,869,022 / 781,250 = ~172.7 segundos = ~2 min 53 s
 ```
 
-### 8.3 Comprobacion de dificultad simplificada
+### 8.3 Comprobación de dificultad simplificada
 
-El diseno comprueba `final_hash[7] == 0` (32 bits cero iniciales en el hash de
-visualizacion). La dificultad real del Bloque 939260 requiere ~76+ bits cero,
-pero la comprobacion de 32 bits es suficiente porque:
+El diseño comprueba `final_hash[7] == 0` (32 bits cero iniciales en el hash de
+visualización). La dificultad real del Bloque 939260 requiere ~76+ bits cero,
+pero la comprobación de 32 bits es suficiente porque:
 
 - Probabilidad de falso positivo por nonce: 1/2^32 = 2.33 x 10^-10
 - Probabilidad acumulada en 134.9M nonces: ~3.1%
-- Aceptable para una demostracion
+- Aceptable para una demostración
 
 ---
 
 ## 9. Inventario completo de pragmas
 
-Tabla de todos los pragmas HLS usados en `src/pico_miner.cpp`, con su ubicacion
-exacta y proposito:
+Tabla de todos los pragmas HLS usados en `src/pico_miner.cpp`, con su ubicación
+exacta y propósito:
 
-| Linea | Pragma | Proposito |
+| Línea | Pragma | Propósito |
 |-------|--------|-----------|
-| 40 | `INLINE off` | Mantener `sha256_compress` como modulo separado (compartido por 2 llamadas) |
+| 40 | `INLINE off` | Mantener `sha256_compress` como módulo separado (compartido por 2 llamadas) |
 | 42 | `ARRAY_PARTITION W complete dim=1` | 64 registros para acceso paralelo sin contenciones |
 | 49 | `UNROLL` (load_W) | Cargar 16 palabras en 1 ciclo |
-| 56 | `UNROLL` (expand_W) | Calcular 48 palabras de expansion combinacionalmente |
-| 67 | `PIPELINE II=1` (compress) | Una ronda de compresion por ciclo de reloj |
+| 56 | `UNROLL` (expand_W) | Calcular 48 palabras de expansión combinacionalmente |
+| 67 | `PIPELINE II=1` (compress) | Una ronda de compresión por ciclo de reloj |
 | 102 | `INTERFACE s_axilite port=midstate bundle=myaxi` | Mapear a registro AXI-Lite |
 | 103 | `INTERFACE s_axilite port=chunk2_tail bundle=myaxi` | Mapear a registro AXI-Lite |
 | 104 | `INTERFACE s_axilite port=nonce_start bundle=myaxi` | Mapear a registro AXI-Lite |
@@ -471,22 +471,22 @@ exacta y proposito:
 | 129 | `UNROLL` (cache_ms) | Copiar midstate en 1 ciclo |
 | 134 | `UNROLL` (cache_tail) | Copiar tail en 1 ciclo |
 | 140 | `ARRAY_PARTITION H_init complete dim=1` | Valores iniciales SHA-256 en registros |
-| 149 | `LOOP_TRIPCOUNT min=1 max=16777216` | Hint para estimacion de rendimiento |
+| 149 | `LOOP_TRIPCOUNT min=1 max=16777216` | Hint para estimación de rendimiento |
 | 163 | `ARRAY_PARTITION chunk2_W complete dim=1` | Bloque chunk 2 en registros |
 | 178 | `ARRAY_PARTITION first_hash complete dim=1` | Primer hash en registros |
 | 189 | `ARRAY_PARTITION hash2_W complete dim=1` | Bloque segundo hash en registros |
 | 193 | `UNROLL` (build_hash2_msg) | Copiar first_hash en 1 ciclo |
 | 203 | `ARRAY_PARTITION final_hash complete dim=1` | Hash final en registros |
 
-**Total: 25 pragmas HLS** distribuidos entre la funcion de compresion (5) y la
-funcion top (20).
+**Total: 25 pragmas HLS** distribuidos entre la función de compresión (5) y la
+función top (20).
 
 ---
 
 ## Archivos relevantes
 
-| Archivo | Descripcion |
+| Archivo | Descripción |
 |---------|-------------|
-| `src/pico_miner.h` | Cabecera compartida: constantes SHA-256, prototipo de funcion, definiciones |
-| `src/pico_miner.cpp` | Nucleo HLS: funcion de compresion SHA-256 + bucle de mineria (225 lineas) |
-| `run_hls.tcl` | Script TCL que automatiza csim, csynth, cosim y export (138 lineas) |
+| `src/pico_miner.h` | Cabecera compartida: constantes SHA-256, prototipo de función, definiciones |
+| `src/pico_miner.cpp` | Núcleo HLS: función de compresión SHA-256 + bucle de minería (225 líneas) |
+| `run_hls.tcl` | Script TCL que automatiza csim, csynth, cosim y export (138 líneas) |

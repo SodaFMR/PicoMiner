@@ -20,7 +20,12 @@ Cryptocurrency mining relies on a brute-force search for a **nonce** value that,
 - **AXI-Lite interface**: ARM controls the FPGA miner via memory-mapped registers
 - **HLS directives**: Pipeline II=1, array partition, and unroll directives for hardware optimization
 
-> For a detailed explanation of the design and architecture, see the [project memory](doc/poc.tex) (bilingual ES/EN LaTeX document).
+> For detailed technical documentation, see:
+> - [Memoria del proyecto](doc/memoria.pdf) — Full project memory (Spanish, LaTeX)
+> - [Arquitectura del sistema](doc/ARQUITECTURA.md) — System architecture, midstate optimization, data flow
+> - [Diseño HLS](doc/HLS.md) — HLS hardware design, pragma inventory, SHA-256 pipeline analysis
+> - [Driver ARM](doc/ARM.md) — ARM driver, AXI-Lite protocol, chunked mining, GPIO LEDs
+> - [Verificación](doc/VERIFICACION.md) — Testing strategy, 5 test cases, cosim rationale
 
 ## Project Structure
 
@@ -32,7 +37,12 @@ PicoMiner/
 │   ├── pico_miner_tb.cpp          # HLS testbench: 5 tests (NIST, Block 1, Block 939260)
 │   └── pico_miner_arm.c           # ARM driver: Block 939260 full-range demo with LEDs
 ├── doc/
-│   └── poc.tex                    # Project memory (bilingual ES/EN, LaTeX)
+│   ├── memoria.tex                # Project memory (Spanish, LaTeX source)
+│   ├── memoria.pdf                # Compiled project memory (15 pages)
+│   ├── ARQUITECTURA.md            # System architecture overview
+│   ├── HLS.md                     # HLS hardware design details
+│   ├── ARM.md                     # ARM driver and PS/PL integration
+│   └── VERIFICACION.md            # Testing and verification strategy
 ├── examples/                      # Course material provided by the teacher
 │   ├── 1. sws2leds_withAXIGPIO/
 │   ├── 3.7 hls2vhdl_complex_sqr_float/
@@ -390,7 +400,12 @@ Vivado HLS 2019.1 maps array arguments as individual scalar registers:
 | `src/pico_miner.cpp` | HLS source: `sha256_compress()` + double-SHA-256 mining loop with midstate optimization |
 | `src/pico_miner_tb.cpp` | HLS testbench: 5 tests -- NIST vector, Block 1 (full-range SW + HW), Block 939260 HW, no-solution |
 | `src/pico_miner_arm.c` | ARM driver: Block 939260 full-range demo with chunked HW calls, LED progress, XTime timing |
-| `doc/poc.tex` | Project memory (bilingual ES/EN): SHA-256 algorithm, architecture, verification, results |
+| `doc/memoria.tex` | Project memory (Spanish, LaTeX source): SHA-256 algorithm, architecture, verification, results |
+| `doc/memoria.pdf` | Compiled project memory (15 pages) |
+| `doc/ARQUITECTURA.md` | System architecture: ARM/FPGA partition, midstate optimization, byte order, data flow |
+| `doc/HLS.md` | HLS hardware design: pragma inventory, SHA-256 pipeline, synthesis solutions |
+| `doc/ARM.md` | ARM driver: AXI-Lite protocol, chunked mining, GPIO LEDs, XTime timing |
+| `doc/VERIFICACION.md` | Verification strategy: 3 levels, 5 test cases, cosim rationale |
 | `run_hls.tcl` | TCL script: builds 2 solutions (II=1 baseline, II=2 relaxed), runs csim/csynth/cosim/export |
 
 ## License
